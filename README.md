@@ -14,7 +14,7 @@ This version is a GitHub Pages deployable web app using:
 - Supabase Storage
 - Supabase Edge Functions
 
-## Current MVP
+## Current Features
 
 - Presenter creates a session.
 - Presenter sees a QR Code and join URL.
@@ -23,11 +23,14 @@ This version is a GitHub Pages deployable web app using:
 - Presenter sees right-to-left danmaku.
 - Presenter can turn danmaku on or off.
 - Presenter can turn anonymous mode on or off.
-- Presenter can upload an image and send it to participants.
-- Presenter can create a multiple-choice question.
+- Presenter can capture a selected region from the display that contains the QR window.
+- Presenter can send screenshots, text, and links to participants.
+- Presenter can create polls, multiple-choice, true-false, and short-answer questions.
 - Participant can answer once.
 - Presenter can stop answering and select the correct answer.
 - Presenter sees answer counts and correct/incorrect percentages.
+- Presenter can run a lottery, buzzer, word cloud, Exit Ticket, and AI session report.
+- Presenter can export the complete class report to Excel.
 
 ## Local Setup
 
@@ -43,11 +46,9 @@ pnpm install
 cp .env.example .env
 ```
 
-3. Create a Supabase project and run `supabase/schema.sql` in the SQL editor.
+3. Create a new Supabase project and use the deployment script documented below. The schema script creates the database, RLS policies, Realtime publication, and Storage bucket together.
 
-4. Create a public Supabase Storage bucket named `interact-screenshots`.
-
-5. Start the dev server.
+4. Start the dev server.
 
 ```bash
 pnpm dev
@@ -61,7 +62,11 @@ The participant app remains available on GitHub Pages. The presenter can also ru
 pnpm desktop:dev
 ```
 
-The desktop app opens the presenter flow and adds `Windows 截圖派送` on the presenter control panel. Captured images use the same Supabase Storage and Realtime flow as uploaded images.
+The desktop app opens the presenter flow and adds screen-region capture to the presenter control panel. Package the portable Windows x64 app with the checked beginner script:
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\package-windows.ps1 -SupabaseUrl https://YOUR_PROJECT_REF.supabase.co -PublishableKey sb_publishable_YOUR_VALUE -PublicAppUrl https://YOUR_GITHUB_USER.github.io/InterAct
+```
 
 ## Build
 

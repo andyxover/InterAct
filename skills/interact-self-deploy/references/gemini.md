@@ -8,7 +8,7 @@ Run:
 powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\deploy-gemini.ps1 -ProjectRef YOUR_PROJECT_REF
 ```
 
-The script securely prompts for the API key, sets `GEMINI_API_KEY` and `GEMINI_MODEL`, deletes its temporary secret file, and deploys all six AI functions. The default model is `gemini-3.6-flash`; override it with `-Model MODEL_NAME` only after verifying availability in that Google AI Studio project.
+The script securely prompts for the API key, sets `GEMINI_API_KEY` and `GEMINI_MODEL`, deletes its temporary secret file, and deploys the three AI functions currently used by InterAct: `analyze-question`, `analyze-session`, and `generate-exit-ticket`. The default model is `gemini-3.6-flash`; override it with `-Model MODEL_NAME` only after verifying availability in that Google AI Studio project.
 
 ## Checkpoint
 

@@ -15,9 +15,6 @@ if ([string]::IsNullOrWhiteSpace($apiKey)) { throw 'Gemini API key is required.'
 
 $secretFile = [IO.Path]::GetTempFileName()
 $aiFunctions = @(
-  'ai-exit-ticket-summary',
-  'ai-screen-preview',
-  'ai-short-answer-summary',
   'analyze-question',
   'analyze-session',
   'generate-exit-ticket'

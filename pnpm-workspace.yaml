@@ -1,2 +1,10 @@
 allowBuilds:
   electron-winstaller: false
+
+overrides:
+  "brace-expansion@<=5.0.7": "5.0.8"
+  "fast-uri@>=3.0.0 <=3.1.3": "3.1.4"
+  "postcss@<=8.5.17": "8.5.18"
+  "shell-quote@<=1.8.4": "1.10.0"
+  "tar@<=7.5.20": "7.5.21"
+  "uuid@<11.1.1": "11.1.1"

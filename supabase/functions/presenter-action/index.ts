@@ -2,6 +2,8 @@ import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 type ParticipantRecord = { id: string; name: string }
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer'])
 
 function randomIndex(length: number) {
   if (length <= 1) return 0
@@ -27,6 +29,19 @@ function normalizedUrl(value: unknown) {
   const parsed = new URL(candidate)
   if (!['http:', 'https:'].includes(parsed.protocol)) throw new Error('Only HTTP and HTTPS links are supported.')
   return parsed.toString().slice(0, 2048)
+}
+
+function validUuid(value: unknown) {
+  return typeof value === 'string' && uuidPattern.test(value)
+}
+
+function normalizedOptions(value: unknown) {
+  if (!Array.isArray(value)) return []
+  return [...new Set(value
+    .filter((option): option is string => typeof option === 'string')
+    .map((option) => option.trim().slice(0, 500))
+    .filter(Boolean))]
+    .slice(0, 20)
 }
 
 Deno.serve(async (req) => {
@@ -89,6 +104,181 @@ Deno.serve(async (req) => {
       .eq('token_hash', tokenHash)
       .maybeSingle()
     if (!keyRecord) return jsonResponse({ message: '講者權限驗證失敗。' }, 403)
+
+    if (action === 'update_session') {
+      const values: Record<string, boolean> = {}
+      if (typeof input.danmakuEnabled === 'boolean') values.danmaku_enabled = input.danmakuEnabled
+      if (typeof input.anonymousEnabled === 'boolean') values.anonymous_enabled = input.anonymousEnabled
+      if (!Object.keys(values).length) return jsonResponse({ message: '沒有可更新的場次設定。' }, 400)
+
+      const { data, error } = await supabase
+        .from('sessions')
+        .update(values)
+        .eq('id', sessionId)
+        .eq('status', 'active')
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return jsonResponse({ message: '場次已結束，無法變更設定。' }, 409)
+      return jsonResponse({ session: data })
+    }
+
+    if (action === 'prepare_screenshot_upload') {
+      const screenshotId = crypto.randomUUID()
+      const extension = typeof input.fileName === 'string'
+        ? input.fileName.toLowerCase().match(/\.(png|jpe?g|webp)$/)?.[1] || 'png'
+        : 'png'
+      const normalizedExtension = extension === 'jpeg' ? 'jpg' : extension
+      const storagePath = `sessions/${sessionId}/screenshots/${screenshotId}.${normalizedExtension}`
+      const { data, error } = await supabase.storage
+        .from('interact-screenshots')
+        .createSignedUploadUrl(storagePath)
+      if (error) throw error
+      return jsonResponse({
+        screenshotId,
+        storagePath,
+        uploadToken: data.token,
+      })
+    }
+
+    if (action === 'create_question') {
+      const screenshotId = input.screenshotId
+      const storagePath = typeof input.storagePath === 'string' ? input.storagePath : ''
+      const type = typeof input.questionType === 'string' ? input.questionType : ''
+      if (!validUuid(screenshotId) || !questionTypes.has(type)) {
+        return jsonResponse({ message: '題目資料格式不正確。' }, 400)
+      }
+      if (storagePath !== `sessions/${sessionId}/screenshots/${screenshotId}.${storagePath.split('.').at(-1)}` ||
+          !/\.(png|jpg|webp)$/.test(storagePath)) {
+        return jsonResponse({ message: '截圖路徑不正確。' }, 400)
+      }
+
+      const options = normalizedOptions(input.options)
+      const allowMultiple = Boolean(input.allowMultiple) && ['poll', 'multiple_choice'].includes(type)
+      const promptText = typeof input.promptText === 'string' ? input.promptText.trim().slice(0, 1000) : ''
+      const titles: Record<string, string> = {
+        send_screen: '派送畫面',
+        poll: '投票題',
+        multiple_choice: '選擇題',
+        true_false: '是非題',
+        short_answer: '問答題',
+      }
+      const { data: objectList, error: objectError } = await supabase.storage
+        .from('interact-screenshots')
+        .list(`sessions/${sessionId}/screenshots`, { search: `${screenshotId}.`, limit: 2 })
+      if (objectError) throw objectError
+      if (!objectList?.some((object) => storagePath.endsWith(`/${object.name}`))) {
+        return jsonResponse({ message: '找不到已上傳的截圖。' }, 400)
+      }
+
+      const stoppedAt = new Date().toISOString()
+      const { error: stopError } = await supabase
+        .from('questions')
+        .update({ status: 'stopped', stopped_at: stoppedAt })
+        .eq('session_id', sessionId)
+        .eq('status', 'active')
+      if (stopError) throw stopError
+
+      const { data: publicData } = supabase.storage.from('interact-screenshots').getPublicUrl(storagePath)
+      const { error: screenshotError } = await supabase
+        .from('screenshots')
+        .insert({
+          id: screenshotId,
+          session_id: sessionId,
+          storage_path: storagePath,
+          public_url: publicData.publicUrl,
+          ai_status: 'skipped',
+        })
+      if (screenshotError) throw screenshotError
+
+      const { data: question, error: questionError } = await supabase
+        .from('questions')
+        .insert({
+          session_id: sessionId,
+          screenshot_id: screenshotId,
+          type,
+          status: 'active',
+          title: titles[type],
+          prompt_text: promptText || null,
+          options,
+          allow_multiple: allowMultiple,
+        })
+        .select('*')
+        .single()
+      if (questionError) throw questionError
+
+      const { error: sessionError } = await supabase
+        .from('sessions')
+        .update({ current_question_id: question.id })
+        .eq('id', sessionId)
+        .eq('status', 'active')
+      if (sessionError) throw sessionError
+      return jsonResponse({ question })
+    }
+
+    if (action === 'stop_question') {
+      const questionId = input.questionId
+      if (!validUuid(questionId)) return jsonResponse({ message: '題目資料格式不正確。' }, 400)
+      const { data, error } = await supabase
+        .from('questions')
+        .update({ status: 'stopped', stopped_at: new Date().toISOString() })
+        .eq('id', questionId)
+        .eq('session_id', sessionId)
+        .eq('status', 'active')
+        .select('*')
+        .maybeSingle()
+      if (error) throw error
+      if (!data) return jsonResponse({ message: '題目已停止或不存在。' }, 409)
+      return jsonResponse({ question: data })
+    }
+
+    if (action === 'grade_question') {
+      const questionId = input.questionId
+      if (!validUuid(questionId)) return jsonResponse({ message: '題目資料格式不正確。' }, 400)
+      const { data: question, error: questionError } = await supabase
+        .from('questions')
+        .select('id, allow_multiple, options, status')
+        .eq('id', questionId)
+        .eq('session_id', sessionId)
+        .maybeSingle()
+      if (questionError) throw questionError
+      if (!question || !['stopped', 'closed'].includes(question.status)) {
+        return jsonResponse({ message: '題目尚未停止或不存在。' }, 409)
+      }
+
+      const available = new Set(normalizedOptions(question.options))
+      const correctAnswers = normalizedOptions(input.correctAnswers).filter((answer) => available.has(answer))
+      const expected = [...correctAnswers].sort()
+      const { error: updateQuestionError } = await supabase
+        .from('questions')
+        .update({
+          correct_answer: question.allow_multiple ? null : correctAnswers[0] || null,
+          correct_answers: correctAnswers,
+        })
+        .eq('id', questionId)
+      if (updateQuestionError) throw updateQuestionError
+
+      const { data: answers, error: answerError } = await supabase
+        .from('answers')
+        .select('id, answer_value, answer_values')
+        .eq('question_id', questionId)
+        .eq('session_id', sessionId)
+      if (answerError) throw answerError
+      for (const answer of answers || []) {
+        const values = Array.isArray(answer.answer_values) && answer.answer_values.length
+          ? answer.answer_values
+          : answer.answer_value
+            ? [answer.answer_value]
+            : []
+        const actual = [...new Set(values)].sort()
+        const isCorrect = expected.length
+          ? actual.length === expected.length && actual.every((value, index) => value === expected[index])
+          : null
+        const { error } = await supabase.from('answers').update({ is_correct: isCorrect }).eq('id', answer.id)
+        if (error) throw error
+      }
+      return jsonResponse({ correctAnswers })
+    }
 
     if (action === 'end_session') {
       const endedAt = new Date().toISOString()

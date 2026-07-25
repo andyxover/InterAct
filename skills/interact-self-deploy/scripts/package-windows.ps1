@@ -15,6 +15,7 @@ param(
 . (Join-Path $PSScriptRoot 'common.ps1')
 
 $root = Get-InterActRoot
+$iconPath = Join-Path $root 'build\icon.ico'
 $envPath = Join-Path $root '.env'
 $output = Join-Path $env:TEMP ("InterAct-package-{0}" -f [DateTimeOffset]::UtcNow.ToUnixTimeMilliseconds())
 $envContent = @"
@@ -25,6 +26,7 @@ VITE_PUBLIC_APP_URL=$($PublicAppUrl.TrimEnd('/'))
 
 Push-Location $root
 try {
+  if (-not (Test-Path -LiteralPath $iconPath)) { throw 'build/icon.ico is missing. Packaging stopped to avoid the default Electron icon.' }
   Write-Utf8NoBom $envPath ($envContent.Trim() + "`n")
   Invoke-Checked 'pnpm.cmd' @('install', '--frozen-lockfile')
   Invoke-Checked 'pnpm.cmd' @('build')
@@ -33,7 +35,15 @@ try {
   $source = Join-Path $output 'interact.exe'
   if (-not (Test-Path -LiteralPath $source)) { throw 'electron-builder did not produce interact.exe.' }
   Copy-Item -LiteralPath $source -Destination (Join-Path $root 'interact.exe') -Force
-  Get-Item -LiteralPath (Join-Path $root 'interact.exe') | Select-Object FullName, Length, LastWriteTime
+  $result = Get-Item -LiteralPath (Join-Path $root 'interact.exe')
+  $hash = Get-FileHash -LiteralPath $result.FullName -Algorithm SHA256
+  [pscustomobject]@{
+    FullName = $result.FullName
+    Length = $result.Length
+    FileVersion = $result.VersionInfo.FileVersion
+    SHA256 = $hash.Hash
+    LastWriteTime = $result.LastWriteTime
+  }
 } finally {
   Pop-Location
 }

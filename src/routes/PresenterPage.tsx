@@ -195,70 +195,78 @@ export function PresenterPage() {
 
   async function updateSession(values: Partial<Session>) {
     if (!session) return
+    const presenterToken = getPresenterToken(session.id)
+    if (!presenterToken) {
+      setAnalysisError('找不到講者權限，請重新加入場次。')
+      return
+    }
     setBusy(true)
     try {
-      await requireSupabase().from('sessions').update(values).eq('id', session.id)
+      const { data, error } = await requireSupabase().functions.invoke('presenter-action', {
+        body: {
+          action: 'update_session',
+          sessionId: session.id,
+          presenterToken,
+          danmakuEnabled: values.danmaku_enabled,
+          anonymousEnabled: values.anonymous_enabled,
+        },
+      })
+      if (error) throw error
+      if (!data?.session) throw new Error(data?.message || '場次設定更新失敗。')
+      setSession(data.session as Session)
+    } catch (error) {
+      setAnalysisError(error instanceof Error ? error.message : '場次設定更新失敗。')
     } finally {
       setBusy(false)
     }
   }
 
   async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) throw new Error('找不到講者權限，請重新加入場次。')
     setBusy(true)
     try {
       const supabase = requireSupabase()
-      const screenshotId = crypto.randomUUID()
-      const path = `sessions/${sessionId}/screenshots/${screenshotId}-${file.name}`
-      const { error: uploadError } = await supabase.storage.from('interact-screenshots').upload(path, file, { upsert: false })
-      if (uploadError) throw uploadError
-      const { data: publicData } = supabase.storage.from('interact-screenshots').getPublicUrl(path)
-      const { error: insertError } = await supabase
-        .from('screenshots')
-        .insert({ id: screenshotId, session_id: sessionId, storage_path: path, public_url: publicData.publicUrl, ai_status: 'skipped' })
-      if (insertError) throw insertError
-      if (session?.current_question_id) {
-        await supabase
-          .from('questions')
-          .update({ status: 'stopped', stopped_at: new Date().toISOString() })
-          .eq('id', session.current_question_id)
-          .eq('status', 'active')
+      const { data: prepared, error: prepareError } = await supabase.functions.invoke('presenter-action', {
+        body: {
+          action: 'prepare_screenshot_upload',
+          sessionId,
+          presenterToken,
+          fileName: file.name,
+        },
+      })
+      if (prepareError) throw prepareError
+      if (!prepared?.screenshotId || !prepared?.storagePath || !prepared?.uploadToken) {
+        throw new Error(prepared?.message || '無法準備截圖上傳。')
       }
-      const { data: questionData, error: questionError } = await supabase
-        .from('questions')
-        .insert({
-          session_id: sessionId,
-          screenshot_id: screenshotId,
-          type,
-          status: 'active',
-          title: questionTitle(type),
-          prompt_text: promptText || null,
-          options,
-          allow_multiple: allowMultiple,
+
+      const { error: uploadError } = await supabase.storage
+        .from('interact-screenshots')
+        .uploadToSignedUrl(prepared.storagePath, prepared.uploadToken, file, {
+          contentType: file.type || 'image/png',
+          upsert: false,
         })
-        .select('*')
-        .single()
-      if (questionError) throw questionError
-      const { error: sessionError } = await supabase
-        .from('sessions')
-        .update({ current_question_id: questionData.id })
-        .eq('id', sessionId)
-      if (sessionError) throw sessionError
-      if (questionData?.id) setSelectedQuestionId(questionData.id)
+      if (uploadError) throw uploadError
+
+      const { data, error } = await supabase.functions.invoke('presenter-action', {
+        body: {
+          action: 'create_question',
+          sessionId,
+          presenterToken,
+          screenshotId: prepared.screenshotId,
+          storagePath: prepared.storagePath,
+          questionType: type,
+          options,
+          allowMultiple,
+          promptText,
+        },
+      })
+      if (error) throw error
+      if (!data?.question) throw new Error(data?.message || '建立題目失敗。')
+      setSelectedQuestionId(data.question.id)
     } finally {
       setBusy(false)
     }
-  }
-
-  function questionTitle(type: QuestionType) {
-    const labels: Record<QuestionType, string> = {
-      send_screen: '派送畫面',
-      poll: '投票題',
-      multiple_choice: '選擇題',
-      true_false: '是非題',
-      short_answer: '問答題',
-    }
-
-    return labels[type]
   }
 
   function dataUrlToFile(dataUrl: string, filename: string) {
@@ -457,55 +465,47 @@ export function PresenterPage() {
 
   async function stopQuestion() {
     if (!session?.current_question_id) return
-    await requireSupabase()
-      .from('questions')
-      .update({ status: 'stopped', stopped_at: new Date().toISOString() })
-      .eq('id', session.current_question_id)
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) throw new Error('找不到講者權限，請重新加入場次。')
+    const { data, error } = await requireSupabase().functions.invoke('presenter-action', {
+      body: {
+        action: 'stop_question',
+        sessionId,
+        presenterToken,
+        questionId: session.current_question_id,
+      },
+    })
+    if (error) throw error
+    if (!data?.question) throw new Error(data?.message || '停止作答失敗。')
   }
 
   async function setCorrectAnswer(answer: string) {
     if (!question || question.status === 'active') return
-    const supabase = requireSupabase()
-    const { data: latestQuestion } = await supabase
-      .from('questions')
-      .select('correct_answers')
-      .eq('id', question.id)
-      .single()
-    const currentCorrectAnswers = latestQuestion?.correct_answers || []
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) throw new Error('找不到講者權限，請重新加入場次。')
+    const currentCorrectAnswers = question.correct_answers || []
     const correctAnswers = question.allow_multiple
       ? currentCorrectAnswers.includes(answer)
         ? currentCorrectAnswers.filter((option: string) => option !== answer)
         : [...currentCorrectAnswers, answer]
       : [answer]
 
-    await supabase
-      .from('questions')
-      .update({
-        correct_answer: question.allow_multiple ? null : answer,
-        correct_answers: correctAnswers,
-      })
-      .eq('id', question.id)
-
-    const { data: submittedAnswers } = await supabase
-      .from('answers')
-      .select('id, answer_value, answer_values')
-      .eq('question_id', question.id)
-    const expected = [...new Set(correctAnswers)].sort()
-
-    await Promise.all(
-      (submittedAnswers || []).map((submitted) => {
-        const values = submitted.answer_values?.length
-          ? submitted.answer_values
-          : submitted.answer_value
-            ? [submitted.answer_value]
-            : []
-        const actual = [...new Set(values)].sort()
-        const isCorrect = expected.length
-          ? actual.length === expected.length && actual.every((value, index) => value === expected[index])
-          : null
-        return supabase.from('answers').update({ is_correct: isCorrect }).eq('id', submitted.id)
-      }),
-    )
+    const { data, error } = await requireSupabase().functions.invoke('presenter-action', {
+      body: {
+        action: 'grade_question',
+        sessionId,
+        presenterToken,
+        questionId: question.id,
+        correctAnswers,
+      },
+    })
+    if (error) throw error
+    if (!Array.isArray(data?.correctAnswers)) throw new Error(data?.message || '答案設定失敗。')
+    setQuestion({
+      ...question,
+      correct_answer: question.allow_multiple ? null : data.correctAnswers[0] || null,
+      correct_answers: data.correctAnswers,
+    })
   }
 
   async function analyzeQuestion() {

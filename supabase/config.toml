@@ -9,15 +9,6 @@ verify_jwt = false
 [functions.presenter-action]
 verify_jwt = false
 
-[functions.ai-exit-ticket-summary]
-verify_jwt = false
-
-[functions.ai-screen-preview]
-verify_jwt = false
-
-[functions.ai-short-answer-summary]
-verify_jwt = false
-
 [functions.analyze-question]
 verify_jwt = false
 

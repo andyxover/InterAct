@@ -3,7 +3,7 @@
 這份教材給第一次接觸程式、終端機、資料庫與 API 的 Windows 使用者。照順序完成即可，不需要先學會寫程式。
 
 > 適用版本：InterAct Windows x64 portable 版  
-> 最後更新：2026-07-22  
+> 最後更新：2026-07-25（InterAct 1.0.2）
 > 重要：每位講師都要使用自己的 Supabase、Gemini、GitHub 與 Reurl 帳號，不要共用別人的 API key 或資料庫。
 
 ## 一、先理解會建立什麼
@@ -198,7 +198,7 @@ powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\d
 powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\deploy-gemini.ps1 -ProjectRef YOUR_PROJECT_REF
 ```
 
-看到提示後貼上 Gemini key，再按 Enter。安全輸入模式不顯示任何字元，這是正常的。腳本會把 key 存進 Supabase Edge Function secrets，並部署所有 AI 函式。預設模型為 `gemini-3.6-flash`。
+看到提示後貼上 Gemini key，再按 Enter。安全輸入模式不顯示任何字元，這是正常的。腳本會把 key 存進 Supabase Edge Function secrets，並部署目前使用中的 `analyze-question`、`analyze-session`、`generate-exit-ticket` 三個 AI 函式。預設模型為 `gemini-3.6-flash`。
 
 如果該 Google 專案無法使用預設模型，先在 AI Studio 查明可用模型，再使用：
 
@@ -294,7 +294,7 @@ powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\p
 4. 在 Windows 暫存區壓縮 Electron portable 程式。
 5. 將完成品複製到專案根目錄，檔名為 `interact.exe`。
 
-第一次可能需要 5 到 15 分鐘。看到 `description is missed`、`author is missed`、`default Electron icon is used` 是提示，不是打包失敗。
+第一次可能需要 5 到 15 分鐘。成功時 PowerShell 會列出檔案位置、大小、版本與 SHA256。若看到 `default Electron icon is used`，代表主題圖示沒有正確套用，不要交付該檔案；請確認 `build\icon.ico` 存在後重跑。
 
 ### 10.2 打包成功標準
 
@@ -306,7 +306,17 @@ interact.exe
 
 檔案通常約 90 MB。雙擊後應可建立場次，QR Code 必須指向自己的 GitHub Pages 網址。
 
-### 10.3 Windows 安全警告
+### 10.3 確認新版圖示與 Windows 釘選
+
+1. 先把舊 InterAct 從「開始」與工作列取消釘選，並關閉所有 InterAct 視窗。
+2. 刪除或改名舊的 `interact.exe`，再執行本章打包指令。
+3. 從專案根目錄雙擊新版 `interact.exe`。
+4. 程式開啟後，再從工作列圖示按右鍵釘選。
+5. 要釘選到開始畫面時，請在檔案總管對新版 `interact.exe` 按右鍵並選「釘選到開始」。
+
+不要直接沿用舊釘選項目。Windows 會快取舊捷徑圖示；InterAct 1.0.2 已把 Start 的圖示來源改為永久存在的 EXE 本身，但舊捷徑仍需取消後重新釘選一次。
+
+### 10.4 Windows 安全警告
 
 目前測試版沒有商業程式碼簽章，因此從網路下載後可能出現 Microsoft Defender SmartScreen「Windows 已保護您的電腦」。只有在檔案來自可信任來源且已核對雜湊時才繼續執行。公開產品化時應採用 Microsoft Store 或可信任的程式碼簽章方案，不應長期要求一般使用者略過警告。
 

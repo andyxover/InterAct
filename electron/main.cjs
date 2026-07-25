@@ -1,18 +1,44 @@
-const { app, BrowserWindow, desktopCapturer, ipcMain, screen } = require('electron')
+const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell } = require('electron')
 const path = require('node:path')
 
 const isDesktopDev = process.env.INTERACT_DESKTOP_DEV === '1'
 const APP_USER_MODEL_ID = 'tw.interact.presenter.desktop'
-const APP_ICON_PATH = isDesktopDev
+const APP_WINDOW_ICON_PATH = isDesktopDev
   ? path.join(__dirname, '..', 'build', 'icon.ico')
   : path.join(process.resourcesPath, 'icon.ico')
 const APP_EXECUTABLE_PATH = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath
+const APP_RELAUNCH_ICON_PATH = isDesktopDev ? APP_WINDOW_ICON_PATH : APP_EXECUTABLE_PATH
 const CONTROL_COLLAPSED = { width: 194, height: 242 }
 const CONTROL_EXPANDED = { width: 420, height: 760 }
 const WINDOW_MARGIN = 12
 const OVERLAY_TOP_LEVEL = 'screen-saver'
 
 app.setAppUserModelId(APP_USER_MODEL_ID)
+
+const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
+
+function requireUuid(value, label = 'session') {
+  if (typeof value !== 'string' || !UUID_PATTERN.test(value)) {
+    throw new Error(`Invalid ${label} identifier.`)
+  }
+  return value
+}
+
+function configureWebContents(window) {
+  window.webContents.setWindowOpenHandler(({ url }) => {
+    try {
+      const parsed = new URL(url)
+      if (parsed.protocol === 'http:' || parsed.protocol === 'https:') void shell.openExternal(parsed.toString())
+    } catch {
+      // Malformed external URLs are ignored.
+    }
+    return { action: 'deny' }
+  })
+
+  window.webContents.on('will-navigate', (event, url) => {
+    if (url !== window.webContents.getURL()) event.preventDefault()
+  })
+}
 
 let mainWindow = null
 let overlayWindow = null
@@ -48,22 +74,24 @@ function createWindow() {
     alwaysOnTop: false,
     skipTaskbar: false,
     title: 'InterAct Presenter',
-    icon: APP_ICON_PATH,
+    icon: APP_WINDOW_ICON_PATH,
     backgroundColor: '#00000000',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
   mainWindow.setAppDetails({
     appId: APP_USER_MODEL_ID,
-    appIconPath: APP_ICON_PATH,
+    appIconPath: APP_RELAUNCH_ICON_PATH,
     appIconIndex: 0,
     relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
     relaunchDisplayName: 'InterAct',
   })
+  configureWebContents(mainWindow)
 
   loadAppRoute(mainWindow, '/presenter/new')
 
@@ -136,9 +164,11 @@ function createOverlayWindow(sessionId) {
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
+  configureWebContents(overlayWindow)
 
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
   overlayWindow.setAlwaysOnTop(true, OVERLAY_TOP_LEVEL)
@@ -176,21 +206,23 @@ function createReportWindow(sessionId, generate = false) {
     maximizable: true,
     backgroundColor: '#f7f8fb',
     title: 'InterAct 課堂互動報告',
-    icon: APP_ICON_PATH,
+    icon: APP_WINDOW_ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
   reportWindow.setAppDetails({
     appId: APP_USER_MODEL_ID,
-    appIconPath: APP_ICON_PATH,
+    appIconPath: APP_RELAUNCH_ICON_PATH,
     appIconIndex: 0,
     relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
     relaunchDisplayName: 'InterAct',
   })
+  configureWebContents(reportWindow)
 
   loadAppRoute(reportWindow, `/session-report/${sessionId}${generate ? '?generate=1' : ''}`)
   reportWindow.once('ready-to-show', () => {
@@ -231,21 +263,23 @@ function createWordCloudWindow(sessionId) {
     maximizable: true,
     backgroundColor: '#0b1020',
     title: 'InterAct 彈幕文字雲',
-    icon: APP_ICON_PATH,
+    icon: APP_WINDOW_ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
+      sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
 
   wordCloudWindow.setAppDetails({
     appId: APP_USER_MODEL_ID,
-    appIconPath: APP_ICON_PATH,
+    appIconPath: APP_RELAUNCH_ICON_PATH,
     appIconIndex: 0,
     relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
     relaunchDisplayName: 'InterAct',
   })
+  configureWebContents(wordCloudWindow)
 
   loadAppRoute(wordCloudWindow, `/word-cloud/${sessionId}`)
   wordCloudWindow.once('ready-to-show', () => {
@@ -307,7 +341,8 @@ async function listCaptureSources(targetDisplay = screen.getPrimaryDisplay(), ty
 }
 
 ipcMain.handle('window:presenter-mode', (_event, sessionId) => {
-  if (!mainWindow || !sessionId) return
+  if (!mainWindow) return
+  requireUuid(sessionId)
   setControlBounds(false, true)
   createOverlayWindow(sessionId)
 })
@@ -351,7 +386,7 @@ ipcMain.handle('window:close', (event) => {
   app.quit()
 })
 ipcMain.handle('window:open-session-report', (_event, sessionId, generate = false) => {
-  if (!sessionId) throw new Error('缺少場次資料。')
+  requireUuid(sessionId)
   createReportWindow(sessionId, Boolean(generate))
 })
 ipcMain.handle('window:return-from-session-report', async (event) => {
@@ -372,7 +407,7 @@ ipcMain.handle('window:return-from-session-report', async (event) => {
   return true
 })
 ipcMain.handle('window:open-word-cloud', (_event, sessionId) => {
-  if (!sessionId) throw new Error('缺少場次資料。')
+  requireUuid(sessionId)
   createWordCloudWindow(sessionId)
 })
 
