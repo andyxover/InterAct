@@ -1,7 +1,7 @@
-import { useMemo, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, DoorClosed, FileChartColumn, ListRestart, LoaderCircle, LogIn, RefreshCw, Sparkles, Trash2, X } from 'lucide-react'
-import { useNavigate } from 'react-router-dom'
+import { useLocation, useNavigate } from 'react-router-dom'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { SetupNotice } from '../components/SetupNotice'
 import { getPresenterToken, savePresenterToken } from '../lib/presenterAuth'
@@ -35,6 +35,7 @@ export function PresenterNewPage() {
   const [managementNotice, setManagementNotice] = useState('')
   const [managedSessions, setManagedSessions] = useState<ManagedSession[]>([])
   const [pendingAction, setPendingAction] = useState<{ type: 'end' | 'delete'; session: ManagedSession } | null>(null)
+  const location = useLocation()
   const navigate = useNavigate()
   const activeSessions = useMemo(() => managedSessions.filter((session) => session.status === 'active'), [managedSessions])
   const endedSessions = useMemo(() => managedSessions.filter((session) => session.status === 'ended'), [managedSessions])
@@ -82,6 +83,14 @@ export function PresenterNewPage() {
     setManagementNotice('')
     await loadManagedSessions()
   }
+
+  useEffect(() => {
+    const routeState = location.state as { openSessionManager?: boolean } | null
+    if (!routeState?.openSessionManager) return
+
+    navigate('/presenter/new', { replace: true, state: null })
+    void openManagement()
+  }, [location.state, navigate])
 
   function rejoinSession(session: ManagedSession) {
     if (session.status !== 'active') return

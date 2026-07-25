@@ -322,6 +322,23 @@ ipcMain.handle('window:open-session-report', (_event, sessionId) => {
   if (!sessionId) throw new Error('缺少場次資料。')
   createReportWindow(sessionId)
 })
+ipcMain.handle('window:return-from-session-report', async (event) => {
+  const targetWindow = BrowserWindow.fromWebContents(event.sender)
+  if (!targetWindow || targetWindow !== reportWindow) return false
+
+  reportWindow = null
+  targetWindow.destroy()
+  overlayWindow?.close()
+  overlayWindow = null
+
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    await loadAppRoute(mainWindow, '/presenter/new')
+    mainWindow.show()
+    mainWindow.moveTop()
+    mainWindow.focus()
+  }
+  return true
+})
 ipcMain.handle('window:open-word-cloud', (_event, sessionId) => {
   if (!sessionId) throw new Error('缺少場次資料。')
   createWordCloudWindow(sessionId)

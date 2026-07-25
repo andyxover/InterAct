@@ -8,16 +8,21 @@ import { PresenterNewPage } from './routes/PresenterNewPage'
 import { PresenterPage } from './routes/PresenterPage'
 import { SessionReportPage } from './routes/SessionReportPage'
 import { WordCloudPage } from './routes/WordCloudPage'
+import { useSessionReportBack } from './lib/sessionReportNavigation'
 
 function AppRoutes() {
   const location = useLocation()
+  const returnFromSessionReport = useSessionReportBack()
   const isDesktop = Boolean(window.interactDesktop)
   const isDesktopOverlay = location.pathname.startsWith('/desktop-overlay/')
   const isDesktopPresenter = isDesktop && location.pathname.startsWith('/presenter/') && location.pathname !== '/presenter/new'
+  const isSessionReport = location.pathname.startsWith('/session-report/')
 
   return (
     <div className={isDesktop ? 'desktop-shell' : undefined}>
-      {!isDesktopOverlay && !isDesktopPresenter && <DesktopWindowChrome />}
+      {!isDesktopOverlay && !isDesktopPresenter && (
+        <DesktopWindowChrome onBack={isSessionReport ? returnFromSessionReport : undefined} />
+      )}
       <Routes>
         <Route path="/" element={<HomePage />} />
         <Route path="/presenter/new" element={isDesktop ? <PresenterNewPage /> : <Navigate to="/" replace />} />

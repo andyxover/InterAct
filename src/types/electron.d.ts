@@ -24,6 +24,7 @@ declare global {
       getLatestLottery: () => Promise<SessionEvent | null>
       onLottery: (callback: (event: SessionEvent) => void) => () => void
       openSessionReport: (sessionId: string) => Promise<void>
+      returnFromSessionReport: () => Promise<boolean>
       openWordCloud: (sessionId: string) => Promise<void>
       minimize: () => Promise<void>
       close: () => Promise<void>

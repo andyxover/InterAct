@@ -1,6 +1,7 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, LoaderCircle, MessageSquareText, RefreshCw, Users, X } from 'lucide-react'
+import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, LoaderCircle, MessageSquareText, RefreshCw, Users } from 'lucide-react'
 import { getPresenterToken } from '../lib/presenterAuth'
+import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
 import type { AiSummary, Answer, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams } from 'react-router-dom'
@@ -56,6 +57,7 @@ function BulletList({ items }: { items: string[] }) {
 
 export function SessionReportPage() {
   const { sessionId = '' } = useParams()
+  const returnToSessionManager = useSessionReportBack()
   const [analysis, setAnalysis] = useState<SessionAnalysis | null>(null)
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null)
   const [reportData, setReportData] = useState<SessionReportData | null>(null)
@@ -141,20 +143,15 @@ export function SessionReportPage() {
     }
   }
 
-  function closeAll() {
-    if (window.interactDesktop) {
-      window.interactDesktop.close()
-    } else {
-      window.close()
-    }
-  }
-
   if (loading) {
     return (
       <main className="session-report-page report-loading">
         <LoaderCircle className="spin" size={34} />
         <h1>AI 正在分析整節課</h1>
         <p className="muted">彙整題目、作答、彈幕與參與資料...</p>
+        <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
+          <ArrowLeft size={17} />返回場次管理
+        </button>
       </main>
     )
   }
@@ -166,7 +163,9 @@ export function SessionReportPage() {
         <p className="error">{error}</p>
         <div className="report-actions">
           <button type="button" onClick={generateReport}><RefreshCw size={17} />重新分析</button>
-          <button className="ghost-button" type="button" onClick={closeAll}><X size={17} />關閉並結束</button>
+          <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
+            <ArrowLeft size={17} />返回場次管理
+          </button>
         </div>
       </main>
     )
@@ -183,11 +182,13 @@ export function SessionReportPage() {
           <p className="muted">{reportData.session.title}．{new Date(reportData.session.created_at).toLocaleString('zh-TW')}</p>
         </div>
         <div className="report-actions">
+          <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
+            <ArrowLeft size={17} />返回場次管理
+          </button>
           <button type="button" onClick={exportExcel} disabled={exporting}>
             {exporting ? <LoaderCircle className="spin" size={17} /> : <Download size={17} />}
             {exporting ? '匯出中...' : '匯出 Excel'}
           </button>
-          <button className="ghost-button" type="button" onClick={closeAll}><X size={17} />關閉並結束</button>
         </div>
       </header>
 
