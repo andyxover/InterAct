@@ -2,12 +2,17 @@ const { app, BrowserWindow, desktopCapturer, ipcMain, screen } = require('electr
 const path = require('node:path')
 
 const isDesktopDev = process.env.INTERACT_DESKTOP_DEV === '1'
+const APP_USER_MODEL_ID = 'tw.interact.presenter.desktop'
+const APP_ICON_PATH = isDesktopDev
+  ? path.join(__dirname, '..', 'build', 'icon.ico')
+  : path.join(process.resourcesPath, 'icon.ico')
+const APP_EXECUTABLE_PATH = process.env.PORTABLE_EXECUTABLE_FILE || process.execPath
 const CONTROL_COLLAPSED = { width: 194, height: 242 }
 const CONTROL_EXPANDED = { width: 420, height: 760 }
 const WINDOW_MARGIN = 12
 const OVERLAY_TOP_LEVEL = 'screen-saver'
 
-app.setAppUserModelId('tw.interact.presenter')
+app.setAppUserModelId(APP_USER_MODEL_ID)
 
 let mainWindow = null
 let overlayWindow = null
@@ -43,12 +48,21 @@ function createWindow() {
     alwaysOnTop: false,
     skipTaskbar: false,
     title: 'InterAct Presenter',
+    icon: APP_ICON_PATH,
     backgroundColor: '#00000000',
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  mainWindow.setAppDetails({
+    appId: APP_USER_MODEL_ID,
+    appIconPath: APP_ICON_PATH,
+    appIconIndex: 0,
+    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
+    relaunchDisplayName: 'InterAct',
   })
 
   loadAppRoute(mainWindow, '/presenter/new')
@@ -162,11 +176,20 @@ function createReportWindow(sessionId) {
     maximizable: true,
     backgroundColor: '#f7f8fb',
     title: 'InterAct 課堂互動報告',
+    icon: APP_ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  reportWindow.setAppDetails({
+    appId: APP_USER_MODEL_ID,
+    appIconPath: APP_ICON_PATH,
+    appIconIndex: 0,
+    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
+    relaunchDisplayName: 'InterAct',
   })
 
   loadAppRoute(reportWindow, `/session-report/${sessionId}`)
@@ -208,11 +231,20 @@ function createWordCloudWindow(sessionId) {
     maximizable: true,
     backgroundColor: '#0b1020',
     title: 'InterAct 彈幕文字雲',
+    icon: APP_ICON_PATH,
     webPreferences: {
       contextIsolation: true,
       nodeIntegration: false,
       preload: path.join(__dirname, 'preload.cjs'),
     },
+  })
+
+  wordCloudWindow.setAppDetails({
+    appId: APP_USER_MODEL_ID,
+    appIconPath: APP_ICON_PATH,
+    appIconIndex: 0,
+    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
+    relaunchDisplayName: 'InterAct',
   })
 
   loadAppRoute(wordCloudWindow, `/word-cloud/${sessionId}`)
