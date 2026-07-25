@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
+import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
@@ -12,6 +13,7 @@ import { SetupNotice } from '../components/SetupNotice'
 import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
 import { getPresenterToken } from '../lib/presenterAuth'
+import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
@@ -32,6 +34,9 @@ export function PresenterPage() {
   const [analysis, setAnalysis] = useState<QuestionAnalysis | null>(null)
   const [analysisBusy, setAnalysisBusy] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
+  const [endClassConfirmOpen, setEndClassConfirmOpen] = useState(false)
+  const [closeConfirmOpen, setCloseConfirmOpen] = useState(false)
+  const [closingSession, setClosingSession] = useState(false)
   const [controlsOpen, setControlsOpen] = useState(false)
   const [editorOpen, setEditorOpen] = useState(false)
   const [textDispatchOpen, setTextDispatchOpen] = useState(false)
@@ -145,8 +150,10 @@ export function PresenterPage() {
 
   useEffect(() => {
     if (!window.interactDesktop || selectionMode) return
-    window.interactDesktop.setPresenterExpanded(controlsOpen || editorOpen || textDispatchOpen)
-  }, [controlsOpen, editorOpen, selectionMode, textDispatchOpen])
+    window.interactDesktop.setPresenterExpanded(
+      controlsOpen || editorOpen || textDispatchOpen || endClassConfirmOpen || closeConfirmOpen,
+    )
+  }, [closeConfirmOpen, controlsOpen, editorOpen, endClassConfirmOpen, selectionMode, textDispatchOpen])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId) return
@@ -730,6 +737,31 @@ export function PresenterPage() {
     }
   }
 
+  async function confirmEndClass() {
+    await endClass()
+    setEndClassConfirmOpen(false)
+  }
+
+  async function closeSessionAndApp() {
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) {
+      setCloseConfirmOpen(false)
+      setAnalysisError('找不到這個場次的講者權限，無法安全結束課程。')
+      return
+    }
+
+    setClosingSession(true)
+    setAnalysisError('')
+    try {
+      await endManagedSession(sessionId, presenterToken)
+      await window.interactDesktop?.close()
+    } catch (error) {
+      setCloseConfirmOpen(false)
+      setAnalysisError(error instanceof Error ? error.message : '無法結束課程，程式尚未關閉。')
+      setClosingSession(false)
+    }
+  }
+
   function selectQuestion(questionId: string) {
     setAnalysisError('')
     setSelectedQuestionId(questionId)
@@ -750,7 +782,7 @@ export function PresenterPage() {
         <aside className="qr-floating">
           <QRCodePanel
             joinUrl={joinUrl}
-            onClose={window.interactDesktop ? () => window.interactDesktop?.close() : undefined}
+            onClose={window.interactDesktop ? () => setCloseConfirmOpen(true) : undefined}
             onMinimize={window.interactDesktop ? () => window.interactDesktop?.minimize() : undefined}
             qrInteractionProps={{
               onPointerCancel: (event) => {
@@ -776,7 +808,7 @@ export function PresenterPage() {
           onToggleDanmaku={() => updateSession({ danmaku_enabled: !session.danmaku_enabled })}
           onCaptureScreen={window.interactDesktop ? captureWindowsScreen : undefined}
           onGenerateExitTicket={generateExitTicket}
-          onEndClass={endClass}
+          onEndClass={() => setEndClassConfirmOpen(true)}
           onOpenTextDispatch={() => {
             setTextDispatchError('')
             setTextDispatchOpen(true)
@@ -853,6 +885,28 @@ export function PresenterPage() {
         open={textDispatchOpen}
         onCancel={() => setTextDispatchOpen(false)}
         onSend={sendSharedContent}
+      />
+      <ConfirmDialog
+        busy={busy}
+        confirmLabel="下課並產生報告"
+        description={`「${session.title}」會停止互動，學員將看到課程已結束；課堂資料、派送內容與分析都會保留。`}
+        open={endClassConfirmOpen}
+        title="確定要下課並產生報告？"
+        onCancel={() => {
+          if (!busy) setEndClassConfirmOpen(false)
+        }}
+        onConfirm={confirmEndClass}
+      />
+      <ConfirmDialog
+        busy={closingSession}
+        confirmLabel="結束課程並關閉"
+        description={`「${session.title}」會立即停止互動，學員將看到課程已結束；系統會保留派送、作答與分析資料。`}
+        open={closeConfirmOpen}
+        title="確定要結束目前課程？"
+        onCancel={() => {
+          if (!closingSession) setCloseConfirmOpen(false)
+        }}
+        onConfirm={closeSessionAndApp}
       />
       {!window.interactDesktop && <LotteryOverlay event={lotteryEvent} onSelect={selectLotteryCandidate} />}
       {!window.interactDesktop && (

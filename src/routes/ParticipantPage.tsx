@@ -302,22 +302,24 @@ export function ParticipantPage() {
       <SetupNotice />
       <StudentSocialLinks />
       <header className="participant-header">
-        <div>
-          <h1>{participant?.name || '與會者'}</h1>
-        </div>
+        <h1>
+          Hi, <strong>{participant?.name || '與會者'}</strong>，歡迎加入「{session?.title || 'InterAct 場次'}」
+        </h1>
       </header>
+      {session?.exit_ticket_prompt && session.exit_ticket_category && (
+        <div className="participant-exit-ticket-priority">
+          <ExitTicketForm
+            busy={exitTicketBusy}
+            category={session.exit_ticket_category}
+            prompt={session.exit_ticket_prompt}
+            ticket={exitTicket}
+            onSubmit={submitExitTicket}
+          />
+        </div>
+      )}
       <SharedContentPanel contents={sharedContents} />
       {screenshot && <img alt="講者派送圖片" className="participant-image" src={screenshot.public_url} />}
       <ParticipantQuestionView answer={answer} question={question} onSubmit={submitAnswer} />
-      {session?.exit_ticket_prompt && session.exit_ticket_category && (
-        <ExitTicketForm
-          busy={exitTicketBusy}
-          category={session.exit_ticket_category}
-          prompt={session.exit_ticket_prompt}
-          ticket={exitTicket}
-          onSubmit={submitExitTicket}
-        />
-      )}
       <form className="panel message-form" onSubmit={sendMessage}>
         <label>
           送出問題或回饋

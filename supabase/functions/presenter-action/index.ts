@@ -35,12 +35,52 @@ Deno.serve(async (req) => {
 
   try {
     const input = await req.json()
+    const action = typeof input.action === 'string' ? input.action : ''
+    const supabase = getAdminClient()
+
+    if (action === 'list_sessions') {
+      const credentials: Array<{ sessionId: string; presenterToken: string }> = Array.isArray(input.credentials)
+        ? input.credentials
+          .map((credential: unknown) => {
+            if (!credential || typeof credential !== 'object') return null
+            const candidate = credential as Record<string, unknown>
+            if (typeof candidate.sessionId !== 'string' || typeof candidate.presenterToken !== 'string') return null
+            return { sessionId: candidate.sessionId, presenterToken: candidate.presenterToken }
+          })
+          .filter((credential): credential is { sessionId: string; presenterToken: string } => Boolean(credential))
+          .slice(0, 100)
+        : []
+      if (!credentials.length) return jsonResponse({ sessions: [] })
+
+      const tokenBySession = new Map<string, string>()
+      for (const credential of credentials) {
+        tokenBySession.set(credential.sessionId, await hashPresenterToken(credential.presenterToken))
+      }
+      const sessionIds = [...tokenBySession.keys()]
+      const { data: keyRecords, error: keyError } = await supabase
+        .from('presenter_session_keys')
+        .select('session_id, token_hash')
+        .in('session_id', sessionIds)
+      if (keyError) throw keyError
+
+      const verifiedIds = (keyRecords || [])
+        .filter((record) => tokenBySession.get(record.session_id) === record.token_hash)
+        .map((record) => record.session_id)
+      if (!verifiedIds.length) return jsonResponse({ sessions: [] })
+
+      const { data: sessions, error: sessionError } = await supabase
+        .from('sessions')
+        .select('id, title, code, status, created_at, ended_at')
+        .in('id', verifiedIds)
+        .order('created_at', { ascending: false })
+      if (sessionError) throw sessionError
+      return jsonResponse({ sessions: sessions || [] })
+    }
+
     const sessionId = typeof input.sessionId === 'string' ? input.sessionId : ''
     const presenterToken = typeof input.presenterToken === 'string' ? input.presenterToken : ''
-    const action = typeof input.action === 'string' ? input.action : ''
     if (!sessionId || !presenterToken || !action) return jsonResponse({ message: '缺少講者操作所需資料。' }, 400)
 
-    const supabase = getAdminClient()
     const tokenHash = await hashPresenterToken(presenterToken)
     const { data: keyRecord } = await supabase
       .from('presenter_session_keys')
@@ -49,6 +89,53 @@ Deno.serve(async (req) => {
       .eq('token_hash', tokenHash)
       .maybeSingle()
     if (!keyRecord) return jsonResponse({ message: '講者權限驗證失敗。' }, 403)
+
+    if (action === 'end_session') {
+      const endedAt = new Date().toISOString()
+      const [sessionResult, questionResult] = await Promise.all([
+        supabase
+          .from('sessions')
+          .update({
+            status: 'ended',
+            ended_at: endedAt,
+            danmaku_enabled: false,
+            current_question_id: null,
+          })
+          .eq('id', sessionId)
+          .select('id, title, code, status, created_at, ended_at')
+          .single(),
+        supabase
+          .from('questions')
+          .update({ status: 'stopped', stopped_at: endedAt })
+          .eq('session_id', sessionId)
+          .eq('status', 'active'),
+      ])
+      if (sessionResult.error) throw sessionResult.error
+      if (questionResult.error) throw questionResult.error
+      return jsonResponse({ session: sessionResult.data })
+    }
+
+    if (action === 'delete_session') {
+      const { data: screenshots, error: screenshotError } = await supabase
+        .from('screenshots')
+        .select('storage_path')
+        .eq('session_id', sessionId)
+      if (screenshotError) throw screenshotError
+
+      const paths = (screenshots || [])
+        .map((screenshot) => screenshot.storage_path)
+        .filter((path): path is string => typeof path === 'string' && Boolean(path))
+      for (let index = 0; index < paths.length; index += 100) {
+        const { error: storageError } = await supabase.storage
+          .from('interact-screenshots')
+          .remove(paths.slice(index, index + 100))
+        if (storageError) throw storageError
+      }
+
+      const { error: deleteError } = await supabase.from('sessions').delete().eq('id', sessionId)
+      if (deleteError) throw deleteError
+      return jsonResponse({ deleted: true, sessionId })
+    }
 
     if (action === 'share_content') {
       const body = typeof input.body === 'string' ? input.body.trim().slice(0, 5000) : ''
