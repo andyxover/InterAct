@@ -33,13 +33,6 @@ export async function endManagedSession(sessionId: string, presenterToken: strin
     body: { action: 'end_session', sessionId, presenterToken },
   })
   if (error) throw new Error(await functionErrorMessage(error, '無法關閉場次。'))
-
-  const { error: analysisError } = await requireSupabase().functions.invoke('analyze-session', {
-    body: { sessionId, presenterToken },
-  })
-  return analysisError
-    ? { analysisWarning: await functionErrorMessage(analysisError, '場次已關閉，但 AI 課程總結尚未完成。') }
-    : { analysisWarning: '' }
 }
 
 export async function deleteManagedSession(sessionId: string, presenterToken: string) {

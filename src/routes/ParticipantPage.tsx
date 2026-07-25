@@ -245,15 +245,15 @@ export function ParticipantPage() {
           <h1>下課啦！</h1>
           <p>{participant?.name ? `${participant.name}，謝謝你的參與。` : '謝謝你的參與。'}</p>
         </section>
-        <section className="panel participant-summary-panel" aria-live="polite">
-          <div className="participant-summary-heading">
-            <span className="heading-icon"><Sparkles size={18} /></span>
-            <div>
-              <p className="eyebrow">AI 課程總結</p>
-              <h2>今天的課程重點</h2>
+        {sessionSummary && (
+          <section className="panel participant-summary-panel" aria-live="polite">
+            <div className="participant-summary-heading">
+              <span className="heading-icon"><Sparkles size={18} /></span>
+              <div>
+                <p className="eyebrow">AI 課程總結</p>
+                <h2>今天的課程重點</h2>
+              </div>
             </div>
-          </div>
-          {sessionSummary ? (
             <div className="participant-summary-content">
               <p className="participant-summary-lead">{sessionSummary.executive_summary}</p>
               <div className="participant-summary-section">
@@ -277,13 +277,8 @@ export function ParticipantPage() {
                 </div>
               )}
             </div>
-          ) : (
-            <div className="participant-summary-pending">
-              <Sparkles size={22} />
-              <p>老師正在整理本次課程重點，完成後會自動顯示在這裡。</p>
-            </div>
-          )}
-        </section>
+          </section>
+        )}
         {sharedContents.length > 0 && (
           <section className="panel participant-ended-shared-panel">
             <SharedContentPanel
@@ -303,7 +298,7 @@ export function ParticipantPage() {
       <StudentSocialLinks />
       <header className="participant-header">
         <h1>
-          Hi, <strong>{participant?.name || '與會者'}</strong>，歡迎加入「{session?.title || 'InterAct 場次'}」
+          <strong>{participant?.name || '與會者'}</strong>，歡迎加入{session?.title || 'InterAct 場次'}
         </h1>
       </header>
       {session?.exit_ticket_prompt && session.exit_ticket_category && (

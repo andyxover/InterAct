@@ -727,9 +727,9 @@ export function PresenterPage() {
     setBusy(true)
     try {
       if (window.interactDesktop) {
-        await window.interactDesktop.openSessionReport(sessionId)
+        await window.interactDesktop.openSessionReport(sessionId, true)
       } else {
-        window.location.hash = `/session-report/${sessionId}`
+        window.location.hash = `/session-report/${sessionId}?generate=1`
       }
     } catch (error) {
       setAnalysisError(error instanceof Error ? error.message : '無法開啟課堂報告。')
@@ -900,7 +900,7 @@ export function PresenterPage() {
       <ConfirmDialog
         busy={closingSession}
         confirmLabel="結束課程並關閉"
-        description={`「${session.title}」會立即停止互動，學員將看到課程已結束；系統會保留派送、作答與分析資料。`}
+        description={`「${session.title}」會立即停止互動，學員將看到課程已結束；系統會保留派送與作答資料，但不會產生 AI 課程總結。`}
         open={closeConfirmOpen}
         title="確定要結束目前課程？"
         onCancel={() => {

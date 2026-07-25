@@ -114,8 +114,8 @@ export function PresenterNewPage() {
         await deleteManagedSession(pendingAction.session.id, presenterToken)
         setManagementNotice(`已永久移除「${pendingAction.session.title}」。`)
       } else {
-        const result = await endManagedSession(pendingAction.session.id, presenterToken)
-        setManagementNotice(result.analysisWarning || `已關閉「${pendingAction.session.title}」，課堂資料仍會保留。`)
+        await endManagedSession(pendingAction.session.id, presenterToken)
+        setManagementNotice(`已關閉「${pendingAction.session.title}」，課堂資料仍會保留，且不會產生 AI 課程總結。`)
       }
       setPendingAction(null)
       setManagedSessions(await listManagedSessions())
@@ -224,7 +224,7 @@ export function PresenterNewPage() {
         confirmLabel={pendingAction?.type === 'delete' ? '永久移除' : '關閉場次'}
         description={pendingAction?.type === 'delete'
           ? `「${pendingAction?.session.title || ''}」的學員、訊息、題目、作答、派送、分析與截圖都會永久刪除，無法復原。`
-          : `「${pendingAction?.session.title || ''}」將停止互動，學員會看到課程已結束；課堂資料、派送內容與分析都會保留。`}
+          : `「${pendingAction?.session.title || ''}」將停止互動，學員會看到課程已結束；課堂資料與派送內容會保留，但不會產生 AI 課程總結。`}
         open={Boolean(pendingAction)}
         title={pendingAction?.type === 'delete' ? '確定永久移除場次？' : '確定關閉場次？'}
         onCancel={() => {

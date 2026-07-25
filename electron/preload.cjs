@@ -13,7 +13,7 @@ contextBridge.exposeInMainWorld('interactDesktop', {
     ipcRenderer.on('lottery:event', listener)
     return () => ipcRenderer.removeListener('lottery:event', listener)
   },
-  openSessionReport: (sessionId) => ipcRenderer.invoke('window:open-session-report', sessionId),
+  openSessionReport: (sessionId, generate = false) => ipcRenderer.invoke('window:open-session-report', sessionId, generate),
   returnFromSessionReport: () => ipcRenderer.invoke('window:return-from-session-report'),
   openWordCloud: (sessionId) => ipcRenderer.invoke('window:open-word-cloud', sessionId),
   minimize: () => ipcRenderer.invoke('window:minimize'),

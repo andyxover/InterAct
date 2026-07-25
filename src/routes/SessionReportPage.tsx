@@ -4,7 +4,7 @@ import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
 import type { AiSummary, Answer, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
-import { useParams } from 'react-router-dom'
+import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
 
@@ -57,6 +57,8 @@ function BulletList({ items }: { items: string[] }) {
 
 export function SessionReportPage() {
   const { sessionId = '' } = useParams()
+  const [searchParams] = useSearchParams()
+  const generateRequested = searchParams.get('generate') === '1'
   const returnToSessionManager = useSessionReportBack()
   const [analysis, setAnalysis] = useState<SessionAnalysis | null>(null)
   const [metrics, setMetrics] = useState<SessionMetrics | null>(null)
@@ -117,9 +119,44 @@ export function SessionReportPage() {
     }
   }, [loadReportData, sessionId])
 
+  const loadSavedReport = useCallback(async () => {
+    setLoading(true)
+    setError('')
+    try {
+      const { data, error: summaryError } = await requireSupabase()
+        .from('ai_summaries')
+        .select('*')
+        .eq('session_id', sessionId)
+        .eq('type', 'exit_ticket_summary')
+        .eq('status', 'success')
+        .order('created_at', { ascending: false })
+        .limit(1)
+        .maybeSingle()
+      if (summaryError) throw summaryError
+
+      const savedSummary = data as AiSummary | null
+      const savedMetrics = savedSummary?.input_json?.metrics as SessionMetrics | undefined
+      if (!savedSummary || !savedMetrics) {
+        throw new Error('此場次是直接結束，未使用「下課並產生報告」，因此沒有 AI 課程總結。')
+      }
+
+      setAnalysis(savedSummary.output_json as SessionAnalysis)
+      setMetrics(savedMetrics)
+      await loadReportData()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '無法讀取課堂報告。')
+    } finally {
+      setLoading(false)
+    }
+  }, [loadReportData, sessionId])
+
   useEffect(() => {
-    generateReport()
-  }, [generateReport])
+    if (generateRequested) {
+      void generateReport()
+    } else {
+      void loadSavedReport()
+    }
+  }, [generateReport, generateRequested, loadSavedReport])
 
   const questionMeta = useMemo(
     () => new Map((reportData?.questions || []).map((question, index) => [question.id, {
@@ -147,8 +184,10 @@ export function SessionReportPage() {
     return (
       <main className="session-report-page report-loading">
         <LoaderCircle className="spin" size={34} />
-        <h1>AI 正在分析整節課</h1>
-        <p className="muted">彙整題目、作答、彈幕與參與資料...</p>
+        <h1>{generateRequested ? 'AI 正在分析整節課' : '正在讀取課堂報告'}</h1>
+        <p className="muted">
+          {generateRequested ? '彙整題目、作答、彈幕與參與資料...' : '載入已產生的課堂分析與互動資料...'}
+        </p>
         <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
           <ArrowLeft size={17} />返回場次管理
         </button>
@@ -162,7 +201,9 @@ export function SessionReportPage() {
         <h1>報告尚未產生</h1>
         <p className="error">{error}</p>
         <div className="report-actions">
-          <button type="button" onClick={generateReport}><RefreshCw size={17} />重新分析</button>
+          {generateRequested && (
+            <button type="button" onClick={generateReport}><RefreshCw size={17} />重新分析</button>
+          )}
           <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
             <ArrowLeft size={17} />返回場次管理
           </button>

@@ -153,7 +153,7 @@ function createOverlayWindow(sessionId) {
   })
 }
 
-function createReportWindow(sessionId) {
+function createReportWindow(sessionId, generate = false) {
   if (reportWindow && !reportWindow.isDestroyed()) {
     if (reportWindow.isMinimized()) reportWindow.restore()
     reportWindow.show()
@@ -192,7 +192,7 @@ function createReportWindow(sessionId) {
     relaunchDisplayName: 'InterAct',
   })
 
-  loadAppRoute(reportWindow, `/session-report/${sessionId}`)
+  loadAppRoute(reportWindow, `/session-report/${sessionId}${generate ? '?generate=1' : ''}`)
   reportWindow.once('ready-to-show', () => {
     reportWindow?.show()
     reportWindow?.focus()
@@ -350,9 +350,9 @@ ipcMain.handle('window:close', (event) => {
   }
   app.quit()
 })
-ipcMain.handle('window:open-session-report', (_event, sessionId) => {
+ipcMain.handle('window:open-session-report', (_event, sessionId, generate = false) => {
   if (!sessionId) throw new Error('缺少場次資料。')
-  createReportWindow(sessionId)
+  createReportWindow(sessionId, Boolean(generate))
 })
 ipcMain.handle('window:return-from-session-report', async (event) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender)
