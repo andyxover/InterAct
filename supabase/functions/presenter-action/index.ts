@@ -132,8 +132,14 @@ Deno.serve(async (req) => {
         if (storageError) throw storageError
       }
 
-      const { error: deleteError } = await supabase.from('sessions').delete().eq('id', sessionId)
+      const { data: deletedSession, error: deleteError } = await supabase
+        .from('sessions')
+        .delete()
+        .eq('id', sessionId)
+        .select('id')
+        .maybeSingle()
       if (deleteError) throw deleteError
+      if (!deletedSession) return jsonResponse({ message: '找不到要移除的場次，資料未變更。' }, 404)
       return jsonResponse({ deleted: true, sessionId })
     }
 
