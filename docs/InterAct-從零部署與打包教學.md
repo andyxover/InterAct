@@ -3,7 +3,7 @@
 這份教材給第一次接觸程式、終端機、資料庫與 API 的 Windows 使用者。照順序完成即可，不需要先學會寫程式。
 
 > 適用版本：InterAct Windows x64 portable 版
-> 最後更新：2026-07-29（InterAct 1.0.3）
+> 最後更新：2026-07-29（InterAct 1.0.4）
 > 重要：每位講師都要使用自己的 Supabase、Gemini、GitHub 與 Reurl 帳號，不要共用別人的 API key 或資料庫。
 
 ## 一、先理解會建立什麼
@@ -314,7 +314,7 @@ interact.exe
 4. 程式開啟後，再從工作列圖示按右鍵釘選。
 5. 要釘選到開始畫面時，請在檔案總管對新版 `interact.exe` 按右鍵並選「釘選到開始」。
 
-不要直接沿用舊釘選項目。Windows 會快取舊捷徑圖示；InterAct 1.0.3 會從永久存在的 EXE 本身讀取 Start 圖示，但舊捷徑仍需取消後重新釘選一次。
+不要直接沿用舊釘選項目。Windows 會快取舊捷徑圖示；InterAct 1.0.4 會從永久存在的 EXE 本身讀取 Start 圖示，但舊捷徑仍需取消後重新釘選一次。
 
 ### 10.4 Windows 安全警告
 
