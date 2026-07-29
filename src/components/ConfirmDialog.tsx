@@ -1,16 +1,28 @@
-import { AlertTriangle, LoaderCircle, X } from 'lucide-react'
+import { AlertTriangle, LoaderCircle, PauseCircle, X } from 'lucide-react'
 
 type Props = {
   busy?: boolean
   confirmLabel: string
   description: string
   open: boolean
+  secondaryLabel?: string
   title: string
   onCancel: () => void
   onConfirm: () => void
+  onSecondary?: () => void
 }
 
-export function ConfirmDialog({ busy = false, confirmLabel, description, open, title, onCancel, onConfirm }: Props) {
+export function ConfirmDialog({
+  busy = false,
+  confirmLabel,
+  description,
+  open,
+  secondaryLabel,
+  title,
+  onCancel,
+  onConfirm,
+  onSecondary,
+}: Props) {
   if (!open) return null
 
   return (
@@ -28,6 +40,12 @@ export function ConfirmDialog({ busy = false, confirmLabel, description, open, t
         </div>
         <div className="confirm-dialog-actions">
           <button className="ghost-button" disabled={busy} type="button" onClick={onCancel}>取消</button>
+          {secondaryLabel && onSecondary && (
+            <button className="pause-button" disabled={busy} type="button" onClick={onSecondary}>
+              {busy ? <LoaderCircle className="spin" size={18} /> : <PauseCircle size={18} />}
+              {secondaryLabel}
+            </button>
+          )}
           <button className="danger-button" disabled={busy} type="button" onClick={onConfirm}>
             {busy ? <LoaderCircle className="spin" size={18} /> : <AlertTriangle size={18} />}
             {busy ? '處理中...' : confirmLabel}

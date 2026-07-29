@@ -3,6 +3,7 @@ import { correctnessStats, countByAnswer } from '../lib/stats'
 import type { Answer, Question, QuestionAnalysis } from '../types'
 
 type Props = {
+  anonymousEnabled: boolean
   question: Question | null
   answers: Answer[]
   analysis: QuestionAnalysis | null
@@ -141,7 +142,7 @@ function AiAnalysisPanel({ question, answers, analysis, analysisBusy, analysisEr
 }
 
 export function QuestionResult(props: Props) {
-  const { question, answers, analysis, onSetCorrectAnswer } = props
+  const { anonymousEnabled, question, answers, analysis, onSetCorrectAnswer } = props
 
   if (!question) {
     return (
@@ -174,9 +175,9 @@ export function QuestionResult(props: Props) {
           </div>
           <p className="muted">已作答 {answers.length} 人</p>
           <div className="answer-list">
-            {answers.map((answer) => (
+            {answers.map((answer, index) => (
               <article className="answer-item" key={answer.id}>
-                <strong>{answer.participant_name}</strong>
+                <strong>{anonymousEnabled ? `匿名回答 ${index + 1}` : answer.participant_name}</strong>
                 <p>{answer.answer_text}</p>
               </article>
             ))}

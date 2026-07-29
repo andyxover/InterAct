@@ -24,13 +24,14 @@ export function DanmakuLayer({ messages, session }: Props) {
         const seed = stableMessageSeed(message.id)
         const lane = seed % 8
         const text = session.anonymous_enabled ? message.content : `${message.participant_name}: ${message.content}`
+        const readableDuration = Math.min(28, 12 + Math.ceil(Array.from(text).length / 12))
         return (
           <div
             className="danmaku-item"
             key={message.id}
             style={{
               top: `${8 + lane * 10}%`,
-              animationDuration: `${12 + ((seed >>> 3) % 4) * 2}s`,
+              animationDuration: `${readableDuration + ((seed >>> 3) % 4)}s`,
               animationDelay: `${((seed >>> 5) % 5) * 0.25}s`,
             }}
           >

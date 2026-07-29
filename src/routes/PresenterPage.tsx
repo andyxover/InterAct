@@ -762,6 +762,18 @@ export function PresenterPage() {
     }
   }
 
+  async function suspendSessionAndCloseApp() {
+    setClosingSession(true)
+    setAnalysisError('')
+    try {
+      await window.interactDesktop?.close()
+    } catch (error) {
+      setCloseConfirmOpen(false)
+      setAnalysisError(error instanceof Error ? error.message : '暫時中止失敗，程式尚未關閉。')
+      setClosingSession(false)
+    }
+  }
+
   function selectQuestion(questionId: string) {
     setAnalysisError('')
     setSelectedQuestionId(questionId)
@@ -823,6 +835,7 @@ export function PresenterPage() {
           onSelect={selectQuestion}
         />
         <QuestionResult
+          anonymousEnabled={session.anonymous_enabled}
           analysis={analysis}
           analysisBusy={analysisBusy}
           analysisError={analysisError}
@@ -837,6 +850,7 @@ export function PresenterPage() {
         />
         {session.exit_ticket_prompt && session.exit_ticket_category && (
           <ExitTicketResult
+            anonymousEnabled={session.anonymous_enabled}
             category={session.exit_ticket_category}
             onlineCount={onlineParticipants.length}
             prompt={session.exit_ticket_prompt}
@@ -899,14 +913,16 @@ export function PresenterPage() {
       />
       <ConfirmDialog
         busy={closingSession}
-        confirmLabel="結束課程並關閉"
-        description={`「${session.title}」會立即停止互動，學員將看到課程已結束；系統會保留派送與作答資料，但不會產生 AI 課程總結。`}
+        confirmLabel="結束課程並離開"
+        description={`暫時中止只會關閉講師程式，場次與資料保持原狀，可從「管理場次」重新加入。選擇結束課程後，學員會看到課程已結束，資料保留但不產生 AI 課程總結。`}
         open={closeConfirmOpen}
-        title="確定要結束目前課程？"
+        secondaryLabel="暫時中止"
+        title={`要如何離開「${session.title}」？`}
         onCancel={() => {
           if (!closingSession) setCloseConfirmOpen(false)
         }}
         onConfirm={closeSessionAndApp}
+        onSecondary={suspendSessionAndCloseApp}
       />
       {!window.interactDesktop && <LotteryOverlay event={lotteryEvent} onSelect={selectLotteryCandidate} />}
       {!window.interactDesktop && (

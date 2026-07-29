@@ -9,13 +9,14 @@ const categoryLabels: Record<ExitTicketCategory, string> = {
 }
 
 type Props = {
+  anonymousEnabled: boolean
   category: ExitTicketCategory
   onlineCount: number
   prompt: string
   tickets: ExitTicket[]
 }
 
-export function ExitTicketResult({ category, onlineCount, prompt, tickets }: Props) {
+export function ExitTicketResult({ anonymousEnabled, category, onlineCount, prompt, tickets }: Props) {
   const ratings = tickets.map((ticket) => ticket.rating).filter((rating): rating is number => rating !== null)
   const average = ratings.length ? ratings.reduce((sum, value) => sum + value, 0) / ratings.length : 0
   const distribution = [1, 2, 3, 4, 5].map((rating) => ({
@@ -44,8 +45,11 @@ export function ExitTicketResult({ category, onlineCount, prompt, tickets }: Pro
       </div>
       {tickets.some((ticket) => ticket.response_text) ? (
         <ul className="exit-ticket-response-list">
-          {tickets.filter((ticket) => ticket.response_text).map((ticket) => (
-            <li key={ticket.id}><strong>{ticket.participant_name}</strong><span>{ticket.response_text}</span></li>
+          {tickets.filter((ticket) => ticket.response_text).map((ticket, index) => (
+            <li key={ticket.id}>
+              <strong>{anonymousEnabled ? `匿名回答 ${index + 1}` : ticket.participant_name}</strong>
+              <span>{ticket.response_text}</span>
+            </li>
           ))}
         </ul>
       ) : <p className="muted">尚未收到文字回答。</p>}

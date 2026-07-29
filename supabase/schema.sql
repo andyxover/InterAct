@@ -245,7 +245,7 @@ with check (
       and participants.session_id = messages.session_id
       and participants.name = messages.participant_name
   )
-  and char_length(btrim(content)) between 1 and 36
+  and char_length(btrim(content)) between 1 and 180
 );
 
 create policy "mvp read screenshots" on public.screenshots for select using (true);

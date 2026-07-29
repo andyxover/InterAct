@@ -1178,8 +1178,13 @@ h2 {
 
 .confirm-dialog-actions {
   display: flex;
+  flex-wrap: wrap;
   gap: 10px;
   justify-content: flex-end;
+}
+
+.confirm-dialog-actions > button {
+  flex: 1 1 140px;
 }
 
 .danger-button {
@@ -1190,6 +1195,18 @@ h2 {
 .danger-button:hover {
   background: var(--danger-dark);
   border-color: var(--danger-dark);
+}
+
+.pause-button {
+  background: var(--energy);
+  border-color: var(--energy);
+  color: #fff;
+}
+
+.pause-button:hover {
+  background: var(--energy-dark);
+  border-color: var(--energy-dark);
+  color: #fff;
 }
 
 .danger-ghost-button {
@@ -1306,9 +1323,16 @@ h2 {
 }
 
 .selected-type {
-  background: var(--primary-soft);
+  background: var(--primary);
   border-color: var(--primary);
-  color: var(--primary-dark);
+  color: #fff;
+}
+
+.selected-type:hover,
+.selected-type:focus-visible {
+  background: var(--primary-dark);
+  border-color: var(--primary-dark);
+  color: #fff;
 }
 
 .type-grid .ghost-button {
@@ -1671,6 +1695,17 @@ h2 {
 
 .message-form {
   border-top: 4px solid var(--primary);
+}
+
+.message-limit {
+  color: var(--muted);
+  font-size: 13px;
+  line-height: 1.5;
+}
+
+.message-limit.over-limit {
+  color: var(--danger);
+  font-weight: 700;
 }
 
 .message-form > button,

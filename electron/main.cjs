@@ -46,7 +46,6 @@ let reportWindow = null
 let wordCloudWindow = null
 let lastControlBounds = null
 let isQuitting = false
-let releaseTopmostTimer = null
 let latestLotteryEvent = null
 
 function appUrl(hash) {
@@ -104,7 +103,7 @@ function createWindow() {
   })
 
   mainWindow.on('restore', () => {
-    setTimeout(bringControlToFront, 60)
+    setTimeout(() => bringControlToFront(true), 60)
   })
 
   mainWindow.on('move', () => {
@@ -124,19 +123,19 @@ function createWindow() {
   })
 }
 
-function bringControlToFront() {
+function setPresenterTopmost(enabled) {
+  if (!mainWindow || mainWindow.isDestroyed()) return
+  mainWindow.setAlwaysOnTop(enabled, OVERLAY_TOP_LEVEL, enabled ? 1 : 0)
+}
+
+function bringControlToFront(focus = false) {
   if (!mainWindow || mainWindow.isDestroyed() || reportWindow) return
 
-  if (releaseTopmostTimer) clearTimeout(releaseTopmostTimer)
-  mainWindow.setAlwaysOnTop(true, OVERLAY_TOP_LEVEL, 1)
   if (mainWindow.isMinimized()) mainWindow.restore()
-  mainWindow.show()
+  if (focus) mainWindow.show()
+  else mainWindow.showInactive()
   mainWindow.moveTop()
-  mainWindow.focus()
-  releaseTopmostTimer = setTimeout(() => {
-    if (mainWindow && !mainWindow.isDestroyed()) mainWindow.setAlwaysOnTop(false)
-    releaseTopmostTimer = null
-  }, 250)
+  if (focus) mainWindow.focus()
 }
 
 function showOverlayInactive() {
@@ -343,6 +342,7 @@ async function listCaptureSources(targetDisplay = screen.getPrimaryDisplay(), ty
 ipcMain.handle('window:presenter-mode', (_event, sessionId) => {
   if (!mainWindow) return
   requireUuid(sessionId)
+  setPresenterTopmost(true)
   setControlBounds(false, true)
   createOverlayWindow(sessionId)
 })
@@ -397,6 +397,7 @@ ipcMain.handle('window:return-from-session-report', async (event) => {
   targetWindow.destroy()
   overlayWindow?.close()
   overlayWindow = null
+  setPresenterTopmost(false)
 
   if (mainWindow && !mainWindow.isDestroyed()) {
     await loadAppRoute(mainWindow, '/presenter/new')
@@ -449,7 +450,7 @@ app.whenReady().then(() => {
       reportWindow.show()
       reportWindow.focus()
     } else if (mainWindow && !mainWindow.isDestroyed()) {
-      bringControlToFront()
+      bringControlToFront(true)
     } else {
       createWindow()
     }

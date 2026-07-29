@@ -10,6 +10,13 @@ import { SharedContentPanel } from '../components/SharedContentPanel'
 import { SetupNotice } from '../components/SetupNotice'
 import { StudentSocialLinks } from '../components/StudentSocialLinks'
 import { isBuzzerAccepting } from '../lib/buzzer'
+import {
+  MESSAGE_MAX_CJK_CHARACTERS,
+  MESSAGE_MAX_ENGLISH_WORDS,
+  MESSAGE_MAX_RAW_CHARACTERS,
+  messageFitsLimit,
+  messageUsage,
+} from '../lib/messageLimit'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
 import type { AiSummary, Answer, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
@@ -139,8 +146,12 @@ export function ParticipantPage() {
 
   async function sendMessage(event: FormEvent) {
     event.preventDefault()
-    const content = Array.from(message.trim()).slice(0, 36).join('')
+    const content = message.trim()
     if (!participant || session?.status !== 'active' || !content) return
+    if (!messageFitsLimit(content)) {
+      setError(`彈幕上限為 ${MESSAGE_MAX_CJK_CHARACTERS} 個中文字或 ${MESSAGE_MAX_ENGLISH_WORDS} 個英文單字。`)
+      return
+    }
     setError('')
     try {
       await requireSupabase().from('messages').insert({
@@ -320,13 +331,20 @@ export function ParticipantPage() {
           送出問題或回饋
           <textarea
             value={message}
-            maxLength={36}
-            onChange={(event) => setMessage(Array.from(event.target.value).slice(0, 36).join(''))}
-            placeholder="送出後這訊息會即時出現在講者的畫面上，上限36個字"
+            maxLength={MESSAGE_MAX_RAW_CHARACTERS}
+            onChange={(event) => {
+              setMessage(event.target.value)
+              if (error) setError('')
+            }}
+            placeholder="送出後會即時出現在講者畫面，上限36個中文字或24個英文單字"
           />
         </label>
+        <p className={`message-limit${message && !messageFitsLimit(message) ? ' over-limit' : ''}`}>
+          上限 {MESSAGE_MAX_CJK_CHARACTERS} 個中文字或 {MESSAGE_MAX_ENGLISH_WORDS} 個英文單字
+          {message && ` · 目前使用 ${Math.ceil(messageUsage(message).units)}/${MESSAGE_MAX_CJK_CHARACTERS}`}
+        </p>
         {error && <p className="error">{error}</p>}
-        <button type="submit"><Send size={18} />送出</button>
+        <button disabled={!message.trim() || !messageFitsLimit(message)} type="submit"><Send size={18} />送出</button>
       </form>
       <LotteryOverlay event={lotteryEvent} participantId={participant?.id} />
       <BuzzerOverlay
