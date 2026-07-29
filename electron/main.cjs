@@ -11,7 +11,10 @@ const APP_RELAUNCH_ICON_PATH = isDesktopDev ? APP_WINDOW_ICON_PATH : APP_EXECUTA
 const CONTROL_COLLAPSED = { width: 194, height: 242 }
 const CONTROL_EXPANDED = { width: 420, height: 760 }
 const WINDOW_MARGIN = 12
-const OVERLAY_TOP_LEVEL = 'screen-saver'
+const TOPMOST_LEVEL = 'screen-saver'
+const CONTROL_RELATIVE_LEVEL = 0
+const OVERLAY_RELATIVE_LEVEL = 2
+const WORD_CLOUD_RELATIVE_LEVEL = 4
 
 app.setAppUserModelId(APP_USER_MODEL_ID)
 
@@ -125,7 +128,7 @@ function createWindow() {
 
 function setPresenterTopmost(enabled) {
   if (!mainWindow || mainWindow.isDestroyed()) return
-  mainWindow.setAlwaysOnTop(enabled, OVERLAY_TOP_LEVEL, enabled ? 1 : 0)
+  mainWindow.setAlwaysOnTop(enabled, TOPMOST_LEVEL, enabled ? CONTROL_RELATIVE_LEVEL : 0)
 }
 
 function bringControlToFront(focus = false) {
@@ -141,7 +144,7 @@ function bringControlToFront(focus = false) {
 function showOverlayInactive() {
   if (!overlayWindow || overlayWindow.isDestroyed()) return
 
-  overlayWindow.setAlwaysOnTop(true, OVERLAY_TOP_LEVEL)
+  overlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
   overlayWindow.showInactive()
   overlayWindow.moveTop()
 }
@@ -149,14 +152,17 @@ function showOverlayInactive() {
 function createOverlayWindow(sessionId) {
   overlayWindow?.close()
   latestLotteryEvent = null
+  const targetDisplay = displayForBounds(mainWindow?.getBounds())
 
   overlayWindow = new BrowserWindow({
-    fullscreen: true,
+    ...targetDisplay.bounds,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
     focusable: true,
     hasShadow: false,
+    resizable: false,
+    maximizable: false,
     skipTaskbar: true,
     show: false,
     backgroundColor: '#00000000',
@@ -170,7 +176,7 @@ function createOverlayWindow(sessionId) {
   configureWebContents(overlayWindow)
 
   overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-  overlayWindow.setAlwaysOnTop(true, OVERLAY_TOP_LEVEL)
+  overlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
   overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
   loadAppRoute(overlayWindow, `/desktop-overlay/${sessionId}`)
   overlayWindow.once('ready-to-show', () => {
@@ -242,6 +248,7 @@ function createReportWindow(sessionId, generate = false) {
 function createWordCloudWindow(sessionId) {
   if (wordCloudWindow && !wordCloudWindow.isDestroyed()) {
     if (wordCloudWindow.isMinimized()) wordCloudWindow.restore()
+    wordCloudWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, WORD_CLOUD_RELATIVE_LEVEL)
     wordCloudWindow.show()
     wordCloudWindow.moveTop()
     wordCloudWindow.focus()
@@ -260,6 +267,7 @@ function createWordCloudWindow(sessionId) {
     show: false,
     resizable: true,
     maximizable: true,
+    alwaysOnTop: true,
     backgroundColor: '#0b1020',
     title: 'InterAct 彈幕文字雲',
     icon: APP_WINDOW_ICON_PATH,
@@ -279,14 +287,19 @@ function createWordCloudWindow(sessionId) {
     relaunchDisplayName: 'InterAct',
   })
   configureWebContents(wordCloudWindow)
+  wordCloudWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, WORD_CLOUD_RELATIVE_LEVEL)
 
   loadAppRoute(wordCloudWindow, `/word-cloud/${sessionId}`)
   wordCloudWindow.once('ready-to-show', () => {
+    overlayWindow?.hide()
     wordCloudWindow?.show()
+    wordCloudWindow?.moveTop()
     wordCloudWindow?.focus()
   })
   wordCloudWindow.on('closed', () => {
     wordCloudWindow = null
+    showOverlayInactive()
+    setTimeout(() => bringControlToFront(false), 60)
   })
 }
 
@@ -357,7 +370,7 @@ ipcMain.handle('lottery:set-interactive', (_event, enabled) => {
   overlayWindow.setFocusable(interactive)
   overlayWindow.setIgnoreMouseEvents(!interactive, { forward: !interactive })
   if (interactive) {
-    overlayWindow.setAlwaysOnTop(true, OVERLAY_TOP_LEVEL)
+    overlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
     overlayWindow.show()
     overlayWindow.focus()
   } else {
@@ -439,7 +452,10 @@ ipcMain.handle('capture:start-selection', async () => {
 ipcMain.handle('capture:finish-selection', (_event, expanded = true) => {
   setControlBounds(Boolean(expanded))
   showOverlayInactive()
-  setTimeout(bringControlToFront, 60)
+  setTimeout(() => {
+    showOverlayInactive()
+    bringControlToFront(false)
+  }, 120)
 })
 
 app.whenReady().then(() => {

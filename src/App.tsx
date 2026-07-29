@@ -17,11 +17,15 @@ function AppRoutes() {
   const isDesktopOverlay = location.pathname.startsWith('/desktop-overlay/')
   const isDesktopPresenter = isDesktop && location.pathname.startsWith('/presenter/') && location.pathname !== '/presenter/new'
   const isSessionReport = location.pathname.startsWith('/session-report/')
+  const isWordCloud = location.pathname.startsWith('/word-cloud/')
 
   return (
     <div className={isDesktop ? 'desktop-shell' : undefined}>
       {!isDesktopOverlay && !isDesktopPresenter && (
-        <DesktopWindowChrome onBack={isSessionReport ? returnFromSessionReport : undefined} />
+        <DesktopWindowChrome
+          confirmClose={!isWordCloud}
+          onBack={isSessionReport ? returnFromSessionReport : undefined}
+        />
       )}
       <Routes>
         <Route path="/" element={<HomePage />} />

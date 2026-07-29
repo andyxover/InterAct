@@ -1,10 +1,11 @@
 import { ArrowLeft, GripHorizontal, Minus, X } from 'lucide-react'
 
 interface DesktopWindowChromeProps {
+  confirmClose?: boolean
   onBack?: () => void | Promise<void>
 }
 
-export function DesktopWindowChrome({ onBack }: DesktopWindowChromeProps) {
+export function DesktopWindowChrome({ confirmClose = true, onBack }: DesktopWindowChromeProps) {
   if (!window.interactDesktop) return null
 
   function requestClose() {
@@ -12,7 +13,7 @@ export function DesktopWindowChrome({ onBack }: DesktopWindowChromeProps) {
       void onBack()
       return
     }
-    if (window.confirm('確定要關閉 InterAct？')) window.interactDesktop?.close()
+    if (!confirmClose || window.confirm('確定要關閉 InterAct？')) window.interactDesktop?.close()
   }
 
   return (

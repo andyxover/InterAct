@@ -16,6 +16,7 @@ export function DesktopOverlayPage() {
   const [lotteryEvent, setLotteryEvent] = useState<LotterySessionEvent | null>(null)
   const [buzzerEvent, setBuzzerEvent] = useState<BuzzerSessionEvent | null>(null)
   const messageCutoffRef = useRef(new Date().toISOString())
+  const loadingRef = useRef(false)
 
   const mergeMessages = useCallback((incoming: Message[]) => {
     setMessages((current) => {
@@ -52,23 +53,38 @@ export function DesktopOverlayPage() {
   }, [])
 
   const loadOverlay = useCallback(async () => {
-    if (!isSupabaseConfigured || !sessionId) return
+    if (!isSupabaseConfigured || !sessionId || loadingRef.current) return
+    loadingRef.current = true
     const supabase = requireSupabase()
-    const [{ data: sessionData }, { data: messageData }] = await Promise.all([
-      supabase.from('sessions').select('*').eq('id', sessionId).single(),
-      supabase
-        .from('messages')
-        .select('*')
-        .eq('session_id', sessionId)
-        .gte('created_at', messageCutoffRef.current)
-        .order('created_at'),
-    ])
-    setSession(sessionData as Session | null)
-    mergeMessages((messageData || []) as Message[])
+    try {
+      const [{ data: sessionData }, { data: messageData }] = await Promise.all([
+        supabase.from('sessions').select('*').eq('id', sessionId).single(),
+        supabase
+          .from('messages')
+          .select('*')
+          .eq('session_id', sessionId)
+          .gte('created_at', messageCutoffRef.current)
+          .order('created_at', { ascending: false })
+          .limit(100),
+      ])
+      setSession(sessionData as Session | null)
+      mergeMessages((messageData || []) as Message[])
+    } catch {
+      // Realtime remains primary; the next poll retries missed updates.
+    } finally {
+      loadingRef.current = false
+    }
   }, [mergeMessages, sessionId])
 
   useEffect(() => {
     loadOverlay()
+  }, [loadOverlay])
+
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      void loadOverlay()
+    }, 3000)
+    return () => window.clearInterval(timer)
   }, [loadOverlay])
 
   useEffect(() => window.interactDesktop?.onLottery(showActivityEvent), [showActivityEvent])
