@@ -20,7 +20,7 @@ create table public.audio_responses (
   participant_name text not null,
   storage_path text not null unique,
   mime_type text not null,
-  duration_ms integer not null check (duration_ms between 250 and 60000),
+  duration_ms integer not null check (duration_ms between 250 and 180000),
   file_size integer not null check (file_size between 1 and 10485760),
   analysis_status text not null default 'pending' check (analysis_status in ('pending', 'success', 'failed')),
   detected_language text null,

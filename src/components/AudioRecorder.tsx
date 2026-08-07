@@ -10,7 +10,7 @@ type Props = {
   onSubmit: (file: File, durationMs: number) => Promise<void>
 }
 
-const MAX_DURATION_MS = 60_000
+const MAX_DURATION_MS = 180_000
 
 function formatDuration(milliseconds: number) {
   const seconds = Math.max(0, Math.ceil(milliseconds / 1000))
@@ -131,7 +131,7 @@ export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
 
   return (
     <div className="audio-recorder">
-      <p className="muted">最長 60 秒。請在安靜處錄音，完成後按停止。</p>
+      <p className="muted">最長 3 分鐘。請在安靜處錄音，完成後按停止。</p>
       <button
         className={recording ? 'recording-button active' : 'recording-button'}
         disabled={busy}

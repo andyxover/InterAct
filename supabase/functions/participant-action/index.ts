@@ -171,7 +171,7 @@ Deno.serve(async (req) => {
       const storagePath = typeof input.storagePath === 'string' ? input.storagePath : ''
       const durationMs = Math.round(Number(input.durationMs))
       const expectedPath = `sessions/${sessionId}/recordings/${questionId}/${participantId}/${recordingId}.wav`
-      if (!validUuid(recordingId) || storagePath !== expectedPath || durationMs < 250 || durationMs > 60_000) {
+      if (!validUuid(recordingId) || storagePath !== expectedPath || durationMs < 250 || durationMs > 180_000) {
         return jsonResponse({ message: '錄音資料格式不正確。' }, 400)
       }
       const { data: audioBlob, error: downloadError } = await supabase.storage.from('interact-recordings').download(storagePath)
