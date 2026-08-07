@@ -109,16 +109,23 @@ export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
           <p className="success">錄音已送出，AI 正在分析；停止作答後會顯示評測結果。</p>
         ) : response.analysis_status === 'success' && analysis ? (
           <>
-            <div className="audio-score"><strong>{analysis.score}</strong><span>分</span></div>
-            <div>
-              <h3>你的個人評測</h3>
-              <p>{analysis.summary}</p>
-              <p className="muted">辨識語言：{analysis.detected_language}</p>
+            <div className="audio-feedback-heading">
+              <div>
+                <h3>你的個人評測</h3>
+                <p className="muted">辨識語言：{analysis.detected_language}</p>
+              </div>
+              <div className="audio-score"><strong>{analysis.score}</strong><span>分</span></div>
             </div>
+            <p className="audio-feedback-summary">{analysis.summary}</p>
             {response.signed_url && <audio controls preload="metadata" src={response.signed_url} />}
-            <details open><summary>錄音內容</summary><p>{analysis.transcript || '未辨識到語音內容'}</p></details>
-            <details open><summary>做得好的地方</summary><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></details>
-            <details open><summary>下一步建議</summary><ul>{analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul></details>
+            <div className="audio-analysis-grid">
+              <div><strong>內容對照</strong><p>{analysis.relevance}</p></div>
+              <div><strong>表達清晰度</strong><p>{analysis.clarity}</p></div>
+              <div><strong>完成度</strong><p>{analysis.completeness}</p></div>
+            </div>
+            <div className="audio-feedback-section"><strong>做得好的地方</strong><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <div className="audio-feedback-section"><strong>下一步建議</strong><ul>{analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <details><summary>查看辨識內容</summary><p>{analysis.transcript || '未辨識到語音內容'}</p></details>
           </>
         ) : response.analysis_status === 'failed' ? (
           <p className="error">錄音已收到，但 AI 評測未完成。請告知講師。</p>

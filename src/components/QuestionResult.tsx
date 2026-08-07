@@ -213,10 +213,15 @@ export function QuestionResult(props: Props) {
                   {response.signed_url && <audio controls preload="metadata" src={response.signed_url} />}
                   {response.analysis_status === 'success' && result ? (
                     <>
-                      <p>{result.summary}</p>
-                      <p><strong>辨識內容：</strong>{result.transcript || '未辨識到語音內容'}</p>
-                      <details><summary>做得好的地方</summary><ul>{result.strengths.map((item) => <li key={item}>{item}</li>)}</ul></details>
-                      <details><summary>改善建議</summary><ul>{result.improvements.map((item) => <li key={item}>{item}</li>)}</ul></details>
+                      <p className="audio-feedback-summary">{result.summary}</p>
+                      <div className="audio-analysis-grid">
+                        <div><strong>內容對照</strong><p>{result.relevance}</p></div>
+                        <div><strong>表達清晰度</strong><p>{result.clarity}</p></div>
+                        <div><strong>完成度</strong><p>{result.completeness}</p></div>
+                      </div>
+                      <div className="audio-feedback-section"><strong>做得好的地方</strong><ul>{result.strengths.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                      <div className="audio-feedback-section"><strong>改善建議</strong><ul>{result.improvements.map((item) => <li key={item}>{item}</li>)}</ul></div>
+                      <details><summary>查看辨識內容</summary><p>{result.transcript || '未辨識到語音內容'}</p></details>
                     </>
                   ) : response.analysis_status === 'failed' ? (
                     <p className="error">AI 評測失敗，錄音仍可播放。</p>
