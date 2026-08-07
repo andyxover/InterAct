@@ -103,6 +103,7 @@ export function PresenterPage() {
   const captionStreamRef = useRef<MediaStream | null>(null)
   const captionChannelRef = useRef<RealtimeChannel | null>(null)
   const interpretationAudioContextRef = useRef<AudioContext | null>(null)
+  const recordingStateRecoveredRef = useRef(false)
 
   function prepareInterpretationAudioContext() {
     const current = interpretationAudioContextRef.current
@@ -230,6 +231,29 @@ export function PresenterPage() {
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  useEffect(() => {
+    if (!session || recordingStateRecoveredRef.current) return
+    recordingStateRecoveredRef.current = true
+    if (!session.recording_enabled || captionConnectionsRef.current.length) return
+    const presenterToken = getPresenterToken(session.id)
+    if (!presenterToken) return
+    void requireSupabase().functions.invoke('presenter-action', {
+      body: {
+        action: 'update_session',
+        sessionId: session.id,
+        presenterToken,
+        recordingEnabled: false,
+        captionsEnabled: false,
+        captionStatus: 'idle',
+      },
+    }).then(({ error }) => {
+      if (error) throw error
+      return loadAll()
+    }).catch((error: unknown) => {
+      setCaptionError(error instanceof Error ? error.message : '無法清除上次中斷的課程錄製狀態。')
+    })
+  }, [loadAll, session])
 
   useEffect(() => {
     if (session?.id && window.interactDesktop) {
