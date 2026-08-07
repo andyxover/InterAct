@@ -68,11 +68,21 @@ async function functionErrorMessage(error: unknown) {
 export async function createRealtimeCaptionConnection(options: ConnectionOptions): Promise<RealtimeCaptionConnection> {
   const peer = new RTCPeerConnection()
   const dataChannel = peer.createDataChannel('oai-events')
+  const translatedAudioElements: HTMLAudioElement[] = []
   let closed = false
   for (const track of options.stream.getAudioTracks()) peer.addTrack(track, options.stream)
   if (options.mode === 'translation' && options.onTranslatedAudio) {
     peer.addEventListener('track', ({ track, streams }) => {
       const translatedStream = streams[0] || new MediaStream([track])
+      track.enabled = true
+      const translatedAudio = new Audio()
+      translatedAudio.autoplay = true
+      translatedAudio.muted = true
+      translatedAudio.srcObject = translatedStream
+      translatedAudioElements.push(translatedAudio)
+      void translatedAudio.play().catch(() => {
+        // MediaStreamTrackProcessor remains the primary capture path in the desktop app.
+      })
       options.onTranslatedAudio?.(translatedStream)
     }, { once: true })
   }
@@ -156,6 +166,10 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
     close() {
       closed = true
       for (const timer of finalizeTimers.values()) window.clearTimeout(timer)
+      for (const audio of translatedAudioElements) {
+        audio.pause()
+        audio.srcObject = null
+      }
       dataChannel.close()
       peer.close()
     },

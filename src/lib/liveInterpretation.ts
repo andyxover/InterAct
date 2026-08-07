@@ -8,6 +8,12 @@ export type InterpretationAudioBroadcaster = {
   close: () => void
 }
 
+type MediaStreamTrackProcessorLike = {
+  readable: ReadableStream<AudioData>
+}
+
+type MediaStreamTrackProcessorConstructor = new (options: { track: MediaStreamTrack }) => MediaStreamTrackProcessorLike
+
 function encodePcm16(samples: Float32Array, sampleRate: number) {
   const buffer = new ArrayBuffer(AUDIO_PACKET_HEADER_BYTES + samples.length * 2)
   const view = new DataView(buffer)
@@ -58,57 +64,117 @@ export async function createInterpretationAudioBroadcaster(
   }
 
   let closed = false
-  if (audioContext.state !== 'running') await audioContext.resume()
-  if (audioContext.state !== 'running') {
-    void supabase.removeChannel(channel)
-    throw new Error('教師端的音訊處理尚未啟動，請關閉後重新開啟課程錄製。')
-  }
-  const source = audioContext.createMediaStreamSource(stream)
-  const processor = audioContext.createScriptProcessor(4096, 1, 1)
-  const silentOutput = audioContext.createGain()
-  // Keep Chromium's audio graph active without making the interpreted track audible locally.
-  silentOutput.gain.value = 0.000001
-  source.connect(processor)
-  processor.connect(silentOutput)
-  silentOutput.connect(audioContext.destination)
-
-  const samplesPerChunk = Math.round(audioContext.sampleRate * CHUNK_DURATION_MS / 1000)
+  let source: MediaStreamAudioSourceNode | null = null
+  let processor: ScriptProcessorNode | null = null
+  let silentOutput: GainNode | null = null
+  let frameReader: ReadableStreamDefaultReader<AudioData> | null = null
   let pendingSamples: number[] = []
+  let pendingSampleRate = 0
   let sendQueue = Promise.resolve()
 
-  const sendChunk = (samples: Float32Array) => {
+  const sendChunk = (samples: Float32Array, sampleRate: number) => {
     sendQueue = sendQueue.then(async () => {
       const result = await channel.send({
         type: 'broadcast',
         event: 'audio',
-        payload: encodePcm16(samples, audioContext.sampleRate),
+        payload: encodePcm16(samples, sampleRate),
       })
       if (result !== 'ok') throw new Error('即時口譯音訊送出失敗。')
     }).catch((error: unknown) => onError(error instanceof Error ? error.message : '即時口譯音訊送出失敗。'))
   }
 
-  processor.addEventListener('audioprocess', (event) => {
-    if (closed || !stream.active) return
-    const input = event.inputBuffer
-    const channels = Array.from({ length: input.numberOfChannels }, (_, index) => input.getChannelData(index))
-    for (let sampleIndex = 0; sampleIndex < input.length; sampleIndex += 1) {
+  const appendSamples = (channels: Float32Array[], sampleRate: number) => {
+    if (closed || !channels.length) return
+    if (pendingSampleRate && pendingSampleRate !== sampleRate) pendingSamples = []
+    pendingSampleRate = sampleRate
+    for (let sampleIndex = 0; sampleIndex < channels[0].length; sampleIndex += 1) {
       let mixed = 0
       for (const channelSamples of channels) mixed += channelSamples[sampleIndex]
       pendingSamples.push(mixed / channels.length)
     }
+    const samplesPerChunk = Math.round(sampleRate * CHUNK_DURATION_MS / 1000)
     while (pendingSamples.length >= samplesPerChunk) {
-      sendChunk(Float32Array.from(pendingSamples.splice(0, samplesPerChunk)))
+      sendChunk(Float32Array.from(pendingSamples.splice(0, samplesPerChunk)), sampleRate)
     }
-  })
+  }
+
+  const startWebAudioFallback = async () => {
+    if (closed || source) return
+    if (audioContext.state !== 'running') await audioContext.resume()
+    if (audioContext.state !== 'running') throw new Error('教師端的音訊處理尚未啟動，請關閉後重新開啟課程錄製。')
+    source = audioContext.createMediaStreamSource(stream)
+    processor = audioContext.createScriptProcessor(4096, 1, 1)
+    silentOutput = audioContext.createGain()
+    // Keep Chromium's audio graph active without making the interpreted track audible locally.
+    silentOutput.gain.value = 0.000001
+    source.connect(processor)
+    processor.connect(silentOutput)
+    silentOutput.connect(audioContext.destination)
+    processor.addEventListener('audioprocess', (event) => {
+      if (closed || !stream.active) return
+      const input = event.inputBuffer
+      appendSamples(
+        Array.from({ length: input.numberOfChannels }, (_, index) => input.getChannelData(index)),
+        audioContext.sampleRate,
+      )
+    })
+  }
+
+  const track = stream.getAudioTracks()[0]
+  if (!track) {
+    void supabase.removeChannel(channel)
+    throw new Error('OpenAI 沒有提供即時口譯音軌。')
+  }
+  const TrackProcessor = (globalThis as typeof globalThis & {
+    MediaStreamTrackProcessor?: MediaStreamTrackProcessorConstructor
+  }).MediaStreamTrackProcessor
+  if (TrackProcessor) {
+    frameReader = new TrackProcessor({ track }).readable.getReader()
+    void (async () => {
+      try {
+        while (!closed && frameReader) {
+          const { done, value } = await frameReader.read()
+          if (done) break
+          try {
+            const channels = Array.from({ length: value.numberOfChannels }, (_, channelIndex) => {
+              const samples = new Float32Array(value.numberOfFrames)
+              value.copyTo(samples, { format: 'f32-planar', planeIndex: channelIndex })
+              return samples
+            })
+            appendSamples(channels, value.sampleRate)
+          } finally {
+            value.close()
+          }
+        }
+      } catch (error) {
+        if (closed) return
+        try {
+          frameReader = null
+          await startWebAudioFallback()
+        } catch {
+          onError(error instanceof Error ? error.message : '即時口譯音訊讀取失敗。')
+        }
+      }
+    })()
+  } else {
+    try {
+      await startWebAudioFallback()
+    } catch (error) {
+      void supabase.removeChannel(channel)
+      throw error
+    }
+  }
 
   return {
     close() {
       if (closed) return
       closed = true
       pendingSamples = []
-      source.disconnect()
-      processor.disconnect()
-      silentOutput.disconnect()
+      void frameReader?.cancel()
+      frameReader = null
+      source?.disconnect()
+      processor?.disconnect()
+      silentOutput?.disconnect()
       void supabase.removeChannel(channel)
     },
   }
