@@ -10,8 +10,27 @@ export type Session = {
   exit_ticket_prompt: string | null
   exit_ticket_category: ExitTicketCategory | null
   exit_ticket_response_type: ExitTicketResponseType | null
+  captions_enabled: boolean
+  caption_status: 'idle' | 'starting' | 'live' | 'error'
+  caption_source_language: string
+  caption_display_language: string
+  caption_started_at: string | null
+  interpretation_enabled: boolean
+  interpretation_languages: string[]
   created_at: string
   ended_at: string | null
+}
+
+export type CaptionSegment = {
+  id: string
+  session_id: string
+  language: string
+  source_language: string
+  text: string
+  is_translation: boolean
+  started_at: string | null
+  ended_at: string | null
+  created_at: string
 }
 
 export type Participant = {
@@ -264,6 +283,7 @@ export type SessionReportData = {
   participants: Participant[]
   messages: Message[]
   sharedContents: SharedContent[]
+  captionSegments: CaptionSegment[]
   screenshots: Screenshot[]
   questions: Question[]
   answers: Answer[]

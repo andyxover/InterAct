@@ -1,9 +1,9 @@
 import { useCallback, useEffect, useMemo, useState } from 'react'
-import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, LoaderCircle, MessageSquareText, RefreshCw, Users } from 'lucide-react'
+import { ArrowLeft, BookOpen, Captions, ChartNoAxesCombined, Clock, Download, ListChecks, LoaderCircle, MessageSquareText, RefreshCw, Users } from 'lucide-react'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
-import type { AiSummary, Answer, AudioResponse, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, CaptionSegment, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
@@ -74,10 +74,11 @@ export function SessionReportPage() {
     const { data: session, error: sessionError } = await supabase.from('sessions').select('*').eq('id', sessionId).single()
     if (sessionError) throw sessionError
 
-    const [participants, messages, sharedContents, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
+    const [participants, messages, sharedContents, captionSegments, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
       fetchAllRows<Participant>('participants', sessionId, 'joined_at'),
       fetchAllRows<Message>('messages', sessionId, 'created_at'),
       fetchAllRows<SharedContent>('shared_contents', sessionId, 'created_at'),
+      fetchAllRows<CaptionSegment>('caption_segments', sessionId, 'created_at'),
       fetchAllRows<Screenshot>('screenshots', sessionId, 'created_at'),
       fetchAllRows<Question>('questions', sessionId, 'created_at'),
       fetchAllRows<Answer>('answers', sessionId, 'submitted_at'),
@@ -97,6 +98,7 @@ export function SessionReportPage() {
       participants,
       messages,
       sharedContents,
+      captionSegments,
       screenshots,
       questions,
       answers,
@@ -266,6 +268,23 @@ export function SessionReportPage() {
 
       <section className="report-section">
         <h2>課堂文字與連結派送</h2>
+        {reportData.captionSegments.length ? (
+          <section className="panel report-section">
+            <div className="report-section-heading">
+              <Captions size={20} />
+              <h2>即時字幕逐字稿</h2>
+            </div>
+            <div className="report-shared-content-list">
+              {reportData.captionSegments.map((segment) => (
+                <article key={segment.id}>
+                  <time>{new Date(segment.created_at).toLocaleString('zh-TW')}</time>
+                  <strong>{segment.language}{segment.is_translation ? ' · 翻譯' : ' · 原文'}</strong>
+                  <p>{segment.text}</p>
+                </article>
+              ))}
+            </div>
+          </section>
+        ) : null}
         {reportData.sharedContents.length ? (
           <div className="report-table-wrap">
             <table className="report-table">

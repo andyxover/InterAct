@@ -1,4 +1,4 @@
-import { BellRing, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Sparkles, Square, Users } from 'lucide-react'
+import { BellRing, Captions, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Sparkles, Square, Users } from 'lucide-react'
 import type { Session } from '../types'
 
 type Props = {
@@ -13,6 +13,7 @@ type Props = {
   onStartBuzzer: () => void
   onOpenTextDispatch: () => void
   onOpenWordCloud: () => void
+  onToggleCaptions: () => void
   onStopQuestion: () => void
   onGenerateExitTicket: () => void
   onEndClass: () => void
@@ -30,6 +31,7 @@ export function PresenterControlPanel({
   onStartBuzzer,
   onOpenTextDispatch,
   onOpenWordCloud,
+  onToggleCaptions,
   onStopQuestion,
   onGenerateExitTicket,
   onEndClass,
@@ -109,6 +111,10 @@ export function PresenterControlPanel({
           <button className="control-action energy-control-action" type="button" onClick={onOpenWordCloud} disabled={busy}>
             <span className="control-action-icon"><Cloud size={18} /></span>
             彈幕文字雲
+          </button>
+          <button className={`control-action caption-control-action${session.captions_enabled ? ' is-active' : ''}`} type="button" onClick={onToggleCaptions} disabled={busy || session.caption_status === 'starting'}>
+            <span className="control-action-icon"><Captions size={18} /></span>
+            {session.caption_status === 'starting' ? '字幕連線中' : session.captions_enabled ? '停止即時字幕' : '開始即時字幕'}
           </button>
         </div>
       </div>

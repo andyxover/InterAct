@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
+import { ParticipantLiveCaptions } from '../components/ParticipantLiveCaptions'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { ExitTicketForm } from '../components/ExitTicketForm'
 import { LotteryOverlay } from '../components/LotteryOverlay'
@@ -19,7 +20,7 @@ import {
 } from '../lib/messageLimit'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
-import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, CaptionSegment, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
 
 export function ParticipantPage() {
   const { sessionId = '' } = useParams()
@@ -35,6 +36,8 @@ export function ParticipantPage() {
   const [exitTicket, setExitTicket] = useState<ExitTicket | null>(null)
   const [sessionSummary, setSessionSummary] = useState<SessionAnalysis | null>(null)
   const [sharedContents, setSharedContents] = useState<SharedContent[]>([])
+  const [liveCaptions, setLiveCaptions] = useState<Record<string, string>>({})
+  const [selectedCaptionLanguage, setSelectedCaptionLanguage] = useState('')
   const [lotteryEvent, setLotteryEvent] = useState<LotterySessionEvent | null>(null)
   const [buzzerEvent, setBuzzerEvent] = useState<BuzzerSessionEvent | null>(null)
   const [buzzerBusy, setBuzzerBusy] = useState(false)
@@ -47,12 +50,13 @@ export function ParticipantPage() {
   const loadAll = useCallback(async () => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
     const supabase = requireSupabase()
-    const [{ data: sessionData }, { data: participantData }, { data: exitTicketData }, { data: sharedContentData }, { data: buzzerData }] = await Promise.all([
+    const [{ data: sessionData }, { data: participantData }, { data: exitTicketData }, { data: sharedContentData }, { data: buzzerData }, { data: captionData }] = await Promise.all([
       supabase.from('sessions').select('*').eq('id', sessionId).single(),
       supabase.from('participants').select('*').eq('id', participantId).single(),
       supabase.from('exit_tickets').select('*').eq('session_id', sessionId).eq('participant_id', participantId).maybeSingle(),
       supabase.from('shared_contents').select('*').eq('session_id', sessionId).order('created_at', { ascending: false }),
       supabase.from('session_events').select('*').eq('session_id', sessionId).eq('event_type', 'buzzer').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('caption_segments').select('*').eq('session_id', sessionId).order('created_at', { ascending: false }).limit(50),
     ])
     const nextSession = sessionData as Session | null
     setSession(nextSession)
@@ -60,6 +64,22 @@ export function ParticipantPage() {
     setExitTicket((exitTicketData as ExitTicket | null) || null)
     setSharedContents((sharedContentData || []) as SharedContent[])
     setBuzzerEvent((buzzerData as BuzzerSessionEvent | null) || null)
+    setLiveCaptions((current) => {
+      const next = { ...current }
+      const currentRunStartedAt = Date.parse(nextSession?.caption_started_at || '')
+      for (const segment of (captionData || []) as CaptionSegment[]) {
+        if (Number.isFinite(currentRunStartedAt) && Date.parse(segment.created_at) < currentRunStartedAt) continue
+        if (!next[segment.language]) next[segment.language] = segment.text
+      }
+      return next
+    })
+    const availableLanguages = [
+      nextSession?.caption_source_language,
+      ...(nextSession?.interpretation_enabled ? nextSession.interpretation_languages : []),
+    ].filter((language): language is string => Boolean(language))
+    setSelectedCaptionLanguage((current) => availableLanguages.includes(current)
+      ? current
+      : nextSession?.caption_display_language || availableLanguages[0] || 'zh-tw')
 
     if (nextSession?.status === 'ended') {
       const { data: summaryData } = await supabase
@@ -132,6 +152,7 @@ export function ParticipantPage() {
       .on('postgres_changes', { event: '*', schema: 'public', table: 'exit_tickets', filter: `participant_id=eq.${participantId}` }, loadAll)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'ai_summaries', filter: `session_id=eq.${sessionId}` }, loadAll)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'shared_contents', filter: `session_id=eq.${sessionId}` }, loadAll)
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'caption_segments', filter: `session_id=eq.${sessionId}` }, loadAll)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'session_events', filter: `session_id=eq.${sessionId}` }, (payload) => {
         const event = payload.new as SessionEvent
         if (event.event_type === 'buzzer') {
@@ -154,6 +175,26 @@ export function ParticipantPage() {
       supabase.removeChannel(channel)
     }
   }, [loadAll, participantId, sessionId])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !sessionId) return
+    const supabase = requireSupabase()
+    const channel = supabase
+      .channel(`captions:${sessionId}`)
+      .on('broadcast', { event: 'caption' }, ({ payload }) => {
+        if (payload?.cleared) {
+          setLiveCaptions({})
+          return
+        }
+        if (typeof payload?.language === 'string' && typeof payload?.text === 'string') {
+          setLiveCaptions((current) => ({ ...current, [payload.language]: payload.text }))
+        }
+      })
+      .subscribe()
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (session?.status !== 'ended') return
@@ -381,6 +422,20 @@ export function ParticipantPage() {
           <strong>{participant?.name || '與會者'}</strong>，歡迎加入{session?.title || 'InterAct 場次'}
         </h1>
       </header>
+      {session?.captions_enabled && (
+        <ParticipantLiveCaptions
+          availableLanguages={[
+            session.caption_source_language,
+            ...(session.interpretation_enabled ? session.interpretation_languages : []),
+          ].filter((language, index, all) => all.indexOf(language) === index)}
+          language={selectedCaptionLanguage || session.caption_display_language}
+          text={liveCaptions[selectedCaptionLanguage || session.caption_display_language] || ''}
+          onLanguageChange={(language) => {
+            setSelectedCaptionLanguage(language)
+            localStorage.setItem(`interact_caption_language_${sessionId}`, language)
+          }}
+        />
+      )}
       {session?.exit_ticket_prompt && session.exit_ticket_category && (
         <div className="participant-exit-ticket-priority">
           <ExitTicketForm

@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
+import { LiveCaptionOverlay } from '../components/LiveCaptionOverlay'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
 import { ExitTicketResult } from '../components/ExitTicketResult'
@@ -16,10 +17,12 @@ import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
+import { createRealtimeCaptionConnection } from '../lib/liveCaptions'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
 import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
 import { useParams } from 'react-router-dom'
+import type { RealtimeChannel } from '@supabase/supabase-js'
 
 export function PresenterPage() {
   const { sessionId = '' } = useParams()
@@ -55,6 +58,10 @@ export function PresenterPage() {
   const qrPressStartRef = useRef<{ pointerId: number; x: number; y: number; startedAt: number } | null>(null)
   const lastQrPressRef = useRef<{ x: number; y: number; time: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [liveCaptions, setLiveCaptions] = useState<Record<string, string>>({})
+  const captionConnectionsRef = useRef<Array<{ close: () => void }>>([])
+  const captionStreamRef = useRef<MediaStream | null>(null)
+  const captionChannelRef = useRef<RealtimeChannel | null>(null)
   const fallbackJoinUrl = useMemo(() => buildJoinUrl(session?.code || sessionId), [session?.code, sessionId])
   const [joinUrl, setJoinUrl] = useState(fallbackJoinUrl)
   const onlineParticipantIds = useSessionPresence(sessionId)
@@ -191,11 +198,21 @@ export function PresenterPage() {
         }
       })
       .subscribe()
-
     return () => {
       supabase.removeChannel(channel)
     }
   }, [loadAll, sessionId])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !sessionId) return
+    const supabase = requireSupabase()
+    const channel = supabase.channel(`captions:${sessionId}`).subscribe()
+    captionChannelRef.current = channel
+    return () => {
+      captionChannelRef.current = null
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId])
 
   useEffect(() => {
     if (!lotteryEvent || lotteryEvent.payload.finalized !== false) return
@@ -223,6 +240,8 @@ export function PresenterPage() {
           presenterToken,
           danmakuEnabled: values.danmaku_enabled,
           anonymousEnabled: values.anonymous_enabled,
+          captionsEnabled: values.captions_enabled,
+          captionStatus: values.caption_status,
         },
       })
       if (error) throw error
@@ -234,6 +253,124 @@ export function PresenterPage() {
       setBusy(false)
     }
   }
+
+  const stopLiveCaptions = useCallback(async (persistState = true) => {
+    for (const connection of captionConnectionsRef.current) connection.close()
+    captionConnectionsRef.current = []
+    for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
+    captionStreamRef.current = null
+    setLiveCaptions({})
+    await captionChannelRef.current?.send({ type: 'broadcast', event: 'caption', payload: { cleared: true } })
+
+    if (persistState) {
+      const presenterToken = getPresenterToken(sessionId)
+      if (presenterToken) {
+        await requireSupabase().functions.invoke('presenter-action', {
+          body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: false, captionStatus: 'idle' },
+        })
+        await loadAll()
+      }
+    }
+  }, [loadAll, sessionId])
+
+  async function startLiveCaptions() {
+    if (!session || captionConnectionsRef.current.length) return
+    const presenterToken = getPresenterToken(session.id)
+    if (!presenterToken) {
+      setAnalysisError('找不到講者權限，請重新加入場次。')
+      return
+    }
+
+    setBusy(true)
+    setAnalysisError('')
+    setLiveCaptions({})
+    try {
+      await captionChannelRef.current?.send({ type: 'broadcast', event: 'caption', payload: { cleared: true } })
+      const { error: startingError } = await requireSupabase().functions.invoke('presenter-action', {
+        body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: true, captionStatus: 'starting' },
+      })
+      if (startingError) throw startingError
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+      })
+      captionStreamRef.current = stream
+
+      const persistCaption = async (language: string, text: string) => {
+        const { error } = await requireSupabase().functions.invoke('presenter-action', {
+          body: {
+            action: 'append_caption',
+            sessionId,
+            presenterToken,
+            language,
+            sourceLanguage: session.caption_source_language,
+            text,
+          },
+        })
+        if (error) console.error('Unable to persist caption segment', error)
+      }
+      const onCaption = ({ language, text, final }: { language: string; text: string; final: boolean }) => {
+        setLiveCaptions((current) => ({ ...current, [language]: text }))
+        void captionChannelRef.current?.send({
+          type: 'broadcast',
+          event: 'caption',
+          payload: { language, text, final, createdAt: new Date().toISOString() },
+        })
+        if (final) void persistCaption(language, text)
+      }
+      const onError = (message: string) => setAnalysisError(message)
+
+      const targets = session.interpretation_enabled
+        ? [...new Set(session.interpretation_languages)].filter((language) => language !== session.caption_source_language)
+        : []
+      const connections = await Promise.all([
+        createRealtimeCaptionConnection({
+          sessionId,
+          presenterToken,
+          mode: 'transcription',
+          language: session.caption_source_language,
+          sourceLanguage: session.caption_source_language,
+          stream,
+          onCaption,
+          onError,
+        }),
+        ...targets.map((language) => createRealtimeCaptionConnection({
+          sessionId,
+          presenterToken,
+          mode: 'translation',
+          language,
+          sourceLanguage: session.caption_source_language,
+          stream,
+          onCaption,
+          onError,
+        })),
+      ])
+      captionConnectionsRef.current = connections
+      const { error: liveError } = await requireSupabase().functions.invoke('presenter-action', {
+        body: { action: 'update_session', sessionId, presenterToken, captionStatus: 'live' },
+      })
+      if (liveError) throw liveError
+      await loadAll()
+    } catch (error) {
+      await stopLiveCaptions(false)
+      await requireSupabase().functions.invoke('presenter-action', {
+        body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: false, captionStatus: 'error' },
+      })
+      setAnalysisError(error instanceof Error ? error.message : '即時字幕啟動失敗。')
+      await loadAll()
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  async function toggleLiveCaptions() {
+    if (captionConnectionsRef.current.length) await stopLiveCaptions()
+    else await startLiveCaptions()
+  }
+
+  useEffect(() => () => {
+    for (const connection of captionConnectionsRef.current) connection.close()
+    for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
+  }, [])
 
   async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {
     const presenterToken = getPresenterToken(sessionId)
@@ -740,6 +877,7 @@ export function PresenterPage() {
 
     setBusy(true)
     try {
+      if (captionConnectionsRef.current.length) await stopLiveCaptions()
       if (window.interactDesktop) {
         await window.interactDesktop.openSessionReport(sessionId, true)
       } else {
@@ -767,6 +905,7 @@ export function PresenterPage() {
     setClosingSession(true)
     setAnalysisError('')
     try {
+      if (captionConnectionsRef.current.length) await stopLiveCaptions()
       await endManagedSession(sessionId, presenterToken)
       await window.interactDesktop?.close()
     } catch (error) {
@@ -780,6 +919,7 @@ export function PresenterPage() {
     setClosingSession(true)
     setAnalysisError('')
     try {
+      if (captionConnectionsRef.current.length) await stopLiveCaptions()
       await window.interactDesktop?.close()
     } catch (error) {
       setCloseConfirmOpen(false)
@@ -840,6 +980,7 @@ export function PresenterPage() {
             setTextDispatchOpen(true)
           }}
           onOpenWordCloud={openWordCloud}
+          onToggleCaptions={toggleLiveCaptions}
         />
         <QuestionHistory
           activeQuestionId={session.current_question_id}
@@ -873,6 +1014,13 @@ export function PresenterPage() {
           />
         )}
       </aside>
+      )}
+      {session.captions_enabled && (
+        <LiveCaptionOverlay
+          language={session.caption_display_language}
+          status={session.caption_status}
+          text={liveCaptions[session.caption_display_language] || liveCaptions[session.caption_source_language] || ''}
+        />
       )}
       {selectionMode && (
         <div

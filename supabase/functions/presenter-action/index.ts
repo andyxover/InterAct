@@ -125,9 +125,14 @@ Deno.serve(async (req) => {
     if (!keyRecord) return jsonResponse({ message: '講者權限驗證失敗。' }, 403)
 
     if (action === 'update_session') {
-      const values: Record<string, boolean> = {}
+      const values: Record<string, boolean | string | null> = {}
       if (typeof input.danmakuEnabled === 'boolean') values.danmaku_enabled = input.danmakuEnabled
       if (typeof input.anonymousEnabled === 'boolean') values.anonymous_enabled = input.anonymousEnabled
+      if (typeof input.captionsEnabled === 'boolean') {
+        values.captions_enabled = input.captionsEnabled
+        if (input.captionsEnabled) values.caption_started_at = new Date().toISOString()
+      }
+      if (['idle', 'starting', 'live', 'error'].includes(input.captionStatus)) values.caption_status = input.captionStatus
       if (!Object.keys(values).length) return jsonResponse({ message: '沒有可更新的場次設定。' }, 400)
 
       const { data, error } = await supabase
@@ -140,6 +145,29 @@ Deno.serve(async (req) => {
       if (error) throw error
       if (!data) return jsonResponse({ message: '場次已結束，無法變更設定。' }, 409)
       return jsonResponse({ session: data })
+    }
+
+    if (action === 'append_caption') {
+      const text = typeof input.text === 'string' ? input.text.trim().slice(0, 4000) : ''
+      const language = typeof input.language === 'string' ? input.language.trim().toLowerCase().slice(0, 20) : ''
+      const sourceLanguage = typeof input.sourceLanguage === 'string' ? input.sourceLanguage.trim().toLowerCase().slice(0, 20) : ''
+      if (!text || !language || !sourceLanguage) return jsonResponse({ message: '字幕內容不完整。' }, 400)
+
+      const { data, error } = await supabase
+        .from('caption_segments')
+        .insert({
+          session_id: sessionId,
+          language,
+          source_language: sourceLanguage,
+          text,
+          is_translation: language !== sourceLanguage,
+          started_at: typeof input.startedAt === 'string' ? input.startedAt : null,
+          ended_at: new Date().toISOString(),
+        })
+        .select('*')
+        .single()
+      if (error) throw error
+      return jsonResponse({ segment: data })
     }
 
     if (action === 'prepare_screenshot_upload') {
@@ -349,6 +377,8 @@ Deno.serve(async (req) => {
             status: 'ended',
             ended_at: endedAt,
             danmaku_enabled: false,
+            captions_enabled: false,
+            caption_status: 'idle',
             current_question_id: null,
           })
           .eq('id', sessionId)

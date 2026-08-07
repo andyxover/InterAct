@@ -8,6 +8,7 @@ import { getPresenterToken, savePresenterToken } from '../lib/presenterAuth'
 import { deleteManagedSession, endManagedSession, listManagedSessions } from '../lib/presenterSessions'
 import type { ManagedSession } from '../lib/presenterSessions'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
+import { CAPTION_LANGUAGES, DEFAULT_CAPTION_LANGUAGE } from '../lib/captionLanguages'
 
 async function getFunctionErrorMessage(error: unknown) {
   if (!(error instanceof Error)) return '建立場次失敗'
@@ -27,6 +28,10 @@ async function getFunctionErrorMessage(error: unknown) {
 
 export function PresenterNewPage() {
   const [title, setTitle] = useState('')
+  const [captionSourceLanguage, setCaptionSourceLanguage] = useState(DEFAULT_CAPTION_LANGUAGE)
+  const [captionDisplayLanguage, setCaptionDisplayLanguage] = useState(DEFAULT_CAPTION_LANGUAGE)
+  const [interpretationEnabled, setInterpretationEnabled] = useState(false)
+  const [interpretationLanguages, setInterpretationLanguages] = useState<string[]>(['en'])
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
   const [managementOpen, setManagementOpen] = useState(false)
@@ -51,7 +56,18 @@ export function PresenterNewPage() {
     setBusy(true)
     try {
       const { data, error: createError } = await requireSupabase().functions.invoke('create-session', {
-        body: { title: title.trim() || '未命名場次' },
+        body: {
+          title: title.trim() || '未命名場次',
+          captionSourceLanguage,
+          captionDisplayLanguage,
+          interpretationEnabled,
+          interpretationLanguages: interpretationEnabled
+            ? [...new Set([
+                ...interpretationLanguages,
+                ...(captionDisplayLanguage !== captionSourceLanguage ? [captionDisplayLanguage] : []),
+              ])]
+            : [],
+        },
         headers: { 'x-interact-client': 'windows-app' },
       })
 
@@ -170,6 +186,52 @@ export function PresenterNewPage() {
           場次名稱
           <input autoFocus value={title} onChange={(event) => setTitle(event.target.value)} placeholder="例如：AI 教學工作坊" />
         </label>
+        <fieldset className="caption-setup-fields">
+          <legend>即時字幕</legend>
+          <div className="caption-language-row">
+            <label>
+              講師語言
+              <select value={captionSourceLanguage} onChange={(event) => {
+                setCaptionSourceLanguage(event.target.value)
+                if (!interpretationEnabled) setCaptionDisplayLanguage(event.target.value)
+              }}>
+                {CAPTION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+              </select>
+            </label>
+            <label>
+              講師字幕
+              <select value={captionDisplayLanguage} onChange={(event) => setCaptionDisplayLanguage(event.target.value)}>
+                {CAPTION_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+              </select>
+            </label>
+          </div>
+          <label className="caption-interpretation-toggle">
+            <input checked={interpretationEnabled} type="checkbox" onChange={(event) => {
+              setInterpretationEnabled(event.target.checked)
+              if (!event.target.checked) setCaptionDisplayLanguage(captionSourceLanguage)
+            }} />
+            <span>開放多語即時翻譯字幕</span>
+          </label>
+          {interpretationEnabled && (
+            <div className="caption-language-options" aria-label="學生可選字幕語言">
+              {CAPTION_LANGUAGES.filter((language) => language.code !== captionSourceLanguage).map((language) => (
+                <label key={language.code}>
+                  <input
+                    checked={interpretationLanguages.includes(language.code)}
+                    type="checkbox"
+                    onChange={(event) => setInterpretationLanguages((current) => (
+                      event.target.checked
+                        ? [...new Set([...current, language.code])].slice(0, 4)
+                        : current.filter((code) => code !== language.code)
+                    ))}
+                  />
+                  <span>{language.label}</span>
+                </label>
+              ))}
+            </div>
+          )}
+          <p className="muted caption-cost-note">翻譯字幕每種語言各建立一條 AI 即時連線；先選現場真正需要的語言即可。</p>
+        </fieldset>
         {error && <p className="error">{error}</p>}
         <button disabled={busy} type="submit">
           {busy ? '建立中...' : '建立場次'}

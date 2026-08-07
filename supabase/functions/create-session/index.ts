@@ -2,6 +2,11 @@ import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
+const captionLanguages = new Set(['zh-tw', 'zh-cn', 'en', 'ja', 'ko', 'es', 'fr', 'de', 'th', 'vi', 'id'])
+
+function normalizedLanguage(value: unknown, fallback = 'zh-tw') {
+  return typeof value === 'string' && captionLanguages.has(value) ? value : fallback
+}
 
 function createCode() {
   const bytes = crypto.getRandomValues(new Uint8Array(6))
@@ -31,6 +36,14 @@ Deno.serve(async (req) => {
   try {
     const input = await req.json()
     const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : ''
+    const sourceLanguage = normalizedLanguage(input.captionSourceLanguage)
+    const displayLanguage = normalizedLanguage(input.captionDisplayLanguage, sourceLanguage)
+    const interpretationLanguages = Array.isArray(input.interpretationLanguages)
+      ? [...new Set(input.interpretationLanguages.filter((language: unknown): language is string => (
+        typeof language === 'string' && captionLanguages.has(language) && language !== sourceLanguage
+      )))].slice(0, 4)
+      : []
+    const interpretationEnabled = Boolean(input.interpretationEnabled) && interpretationLanguages.length > 0
     const presenterToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll('-', '')
     const tokenHash = await hashPresenterToken(presenterToken)
     const supabase = getAdminClient()
@@ -39,7 +52,14 @@ Deno.serve(async (req) => {
     for (let attempt = 0; attempt < 5; attempt += 1) {
       const { data, error } = await supabase
         .from('sessions')
-        .insert({ title: title || '未命名場次', code: createCode() })
+        .insert({
+          title: title || '未命名場次',
+          code: createCode(),
+          caption_source_language: sourceLanguage,
+          caption_display_language: displayLanguage,
+          interpretation_enabled: interpretationEnabled,
+          interpretation_languages: interpretationEnabled ? interpretationLanguages : [],
+        })
         .select('id, code')
         .single()
 
