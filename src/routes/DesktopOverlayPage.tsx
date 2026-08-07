@@ -3,11 +3,12 @@ import { useParams } from 'react-router-dom'
 import { DanmakuLayer } from '../components/DanmakuLayer'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { LotteryOverlay } from '../components/LotteryOverlay'
+import { LiveCaptionOverlay } from '../components/LiveCaptionOverlay'
 import { isBuzzerAccepting, isBuzzerPending } from '../lib/buzzer'
 import { finalizeLottery } from '../lib/lottery'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
-import type { BuzzerSessionEvent, LotterySessionEvent, Message, Session, SessionEvent } from '../types'
+import type { BuzzerSessionEvent, CaptionSegment, LotterySessionEvent, Message, Session, SessionEvent } from '../types'
 
 export function DesktopOverlayPage() {
   const { sessionId = '' } = useParams()
@@ -15,6 +16,7 @@ export function DesktopOverlayPage() {
   const [messages, setMessages] = useState<Message[]>([])
   const [lotteryEvent, setLotteryEvent] = useState<LotterySessionEvent | null>(null)
   const [buzzerEvent, setBuzzerEvent] = useState<BuzzerSessionEvent | null>(null)
+  const [liveCaptions, setLiveCaptions] = useState<Record<string, string>>({})
   const messageCutoffRef = useRef(new Date().toISOString())
   const loadingRef = useRef(false)
 
@@ -57,7 +59,7 @@ export function DesktopOverlayPage() {
     loadingRef.current = true
     const supabase = requireSupabase()
     try {
-      const [{ data: sessionData }, { data: messageData }] = await Promise.all([
+      const [{ data: sessionData }, { data: messageData }, { data: captionData }] = await Promise.all([
         supabase.from('sessions').select('*').eq('id', sessionId).single(),
         supabase
           .from('messages')
@@ -66,9 +68,25 @@ export function DesktopOverlayPage() {
           .gte('created_at', messageCutoffRef.current)
           .order('created_at', { ascending: false })
           .limit(100),
+        supabase
+          .from('caption_segments')
+          .select('*')
+          .eq('session_id', sessionId)
+          .order('created_at', { ascending: false })
+          .limit(50),
       ])
-      setSession(sessionData as Session | null)
+      const nextSession = sessionData as Session | null
+      setSession(nextSession)
       mergeMessages((messageData || []) as Message[])
+      setLiveCaptions((current) => {
+        const latest: Record<string, string> = {}
+        const currentRunStartedAt = Date.parse(nextSession?.caption_started_at || '')
+        for (const segment of (captionData || []) as CaptionSegment[]) {
+          if (Number.isFinite(currentRunStartedAt) && Date.parse(segment.created_at) < currentRunStartedAt) continue
+          if (!latest[segment.language]) latest[segment.language] = segment.text
+        }
+        return { ...current, ...latest }
+      })
     } catch {
       // Realtime remains primary; the next poll retries missed updates.
     } finally {
@@ -107,6 +125,10 @@ export function DesktopOverlayPage() {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'messages', filter: `session_id=eq.${sessionId}` }, (payload) => {
         mergeMessages([payload.new as Message])
       })
+      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'caption_segments', filter: `session_id=eq.${sessionId}` }, (payload) => {
+        const segment = payload.new as CaptionSegment
+        setLiveCaptions((current) => ({ ...current, [segment.language]: segment.text }))
+      })
       .on('postgres_changes', { event: '*', schema: 'public', table: 'session_events', filter: `session_id=eq.${sessionId}` }, (payload) => {
         const event = payload.new as SessionEvent
         showActivityEvent(event)
@@ -117,6 +139,27 @@ export function DesktopOverlayPage() {
       supabase.removeChannel(channel)
     }
   }, [loadOverlay, mergeMessages, sessionId, showActivityEvent])
+
+  useEffect(() => {
+    if (!isSupabaseConfigured || !sessionId) return
+    const supabase = requireSupabase()
+    const channel = supabase
+      .channel(`captions:${sessionId}`)
+      .on('broadcast', { event: 'caption' }, ({ payload }) => {
+        if (payload?.cleared) {
+          setLiveCaptions({})
+          return
+        }
+        if (typeof payload?.language === 'string' && typeof payload?.text === 'string') {
+          setLiveCaptions((current) => ({ ...current, [payload.language]: payload.text }))
+        }
+      })
+      .subscribe()
+
+    return () => {
+      supabase.removeChannel(channel)
+    }
+  }, [sessionId])
 
   useEffect(() => {
     const interactive = Boolean(
@@ -167,10 +210,18 @@ export function DesktopOverlayPage() {
 
   if (!session) return null
   return (
-    <>
+    <div className="desktop-overlay-root">
       <DanmakuLayer messages={messages} session={session} />
+      {session.captions_enabled && (
+        <LiveCaptionOverlay
+          fontBold={session.caption_font_bold}
+          fontSize={session.caption_font_size}
+          status={session.caption_status}
+          text={liveCaptions[session.caption_source_language] || ''}
+        />
+      )}
       <LotteryOverlay event={lotteryEvent} onSelect={selectLotteryCandidate} />
       <BuzzerOverlay event={buzzerEvent} onStart={activateBuzzer} />
-    </>
+    </div>
   )
 }

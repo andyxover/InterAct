@@ -2,6 +2,8 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
+import { PresenterSettingsModal } from '../components/PresenterSettingsModal'
+import type { PresenterCaptionSettings } from '../components/PresenterSettingsModal'
 import { LiveCaptionOverlay } from '../components/LiveCaptionOverlay'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
@@ -18,11 +20,35 @@ import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
 import { createRealtimeCaptionConnection } from '../lib/liveCaptions'
+import { createInterpretationAudioBroadcaster } from '../lib/liveInterpretation'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
 import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
 import { useParams } from 'react-router-dom'
 import type { RealtimeChannel } from '@supabase/supabase-js'
+
+function microphoneErrorMessage(error: unknown) {
+  if (!(error instanceof DOMException)) return error instanceof Error ? error.message : '無法讀取麥克風。'
+  if (error.name === 'NotAllowedError') return 'Windows 或程式未允許使用麥克風。'
+  if (error.name === 'NotFoundError') return '找不到可用的麥克風。'
+  if (error.name === 'NotReadableError') return '麥克風正被其他程式獨占，暫時無法使用。'
+  if (error.name === 'OverconstrainedError') return '先前選擇的麥克風目前不可用。'
+  return error.message || '無法讀取麥克風。'
+}
+
+function realtimeRetryDelay(message: string) {
+  const match = message.match(/try again in\s+([\d.]+)\s*(ms|s)/i)
+  if (!match) return null
+  const value = Number(match[1])
+  if (!Number.isFinite(value)) return null
+  return Math.min(65_000, Math.max(500, match[2].toLowerCase() === 's' ? value * 1000 : value) + 350)
+}
+
+function readableRealtimeError(message: string) {
+  if (/tokens per min|TPM/i.test(message)) return 'OpenAI 即時翻譯用量上限不足，請提高 API Project 的使用等級或限制。'
+  if (/rate limit reached/i.test(message)) return 'OpenAI 即時翻譯連線頻率暫時達到上限，請稍候再試。'
+  return message
+}
 
 export function PresenterPage() {
   const { sessionId = '' } = useParams()
@@ -45,6 +71,12 @@ export function PresenterPage() {
   const [editorOpen, setEditorOpen] = useState(false)
   const [textDispatchOpen, setTextDispatchOpen] = useState(false)
   const [textDispatchError, setTextDispatchError] = useState('')
+  const [settingsOpen, setSettingsOpen] = useState(false)
+  const [settingsBusy, setSettingsBusy] = useState(false)
+  const [settingsError, setSettingsError] = useState('')
+  const [captionError, setCaptionError] = useState('')
+  const [microphones, setMicrophones] = useState<MediaDeviceInfo[]>([])
+  const [selectedMicrophoneId, setSelectedMicrophoneId] = useState(() => localStorage.getItem('interact:caption-microphone') || '')
   const [lotteryEvent, setLotteryEvent] = useState<LotterySessionEvent | null>(null)
   const [buzzerEvent, setBuzzerEvent] = useState<BuzzerSessionEvent | null>(null)
   const [captureFile, setCaptureFile] = useState<File | null>(null)
@@ -60,6 +92,10 @@ export function PresenterPage() {
   const [busy, setBusy] = useState(false)
   const [liveCaptions, setLiveCaptions] = useState<Record<string, string>>({})
   const captionConnectionsRef = useRef<Array<{ close: () => void }>>([])
+  const interpretationBroadcastersRef = useRef<Array<{ close: () => void }>>([])
+  const pendingCaptionWritesRef = useRef<Set<Promise<void>>>(new Set())
+  const captionRetryTimersRef = useRef<number[]>([])
+  const captionRunIdRef = useRef(0)
   const captionStreamRef = useRef<MediaStream | null>(null)
   const captionChannelRef = useRef<RealtimeChannel | null>(null)
   const fallbackJoinUrl = useMemo(() => buildJoinUrl(session?.code || sessionId), [session?.code, sessionId])
@@ -172,9 +208,9 @@ export function PresenterPage() {
   useEffect(() => {
     if (!window.interactDesktop || selectionMode) return
     window.interactDesktop.setPresenterExpanded(
-      controlsOpen || editorOpen || textDispatchOpen || endClassConfirmOpen || closeConfirmOpen,
+      controlsOpen || editorOpen || textDispatchOpen || settingsOpen || endClassConfirmOpen || closeConfirmOpen,
     )
-  }, [closeConfirmOpen, controlsOpen, editorOpen, endClassConfirmOpen, selectionMode, textDispatchOpen])
+  }, [closeConfirmOpen, controlsOpen, editorOpen, endClassConfirmOpen, selectionMode, settingsOpen, textDispatchOpen])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId) return
@@ -214,6 +250,35 @@ export function PresenterPage() {
     }
   }, [sessionId])
 
+  const refreshMicrophones = useCallback(async () => {
+    setSettingsError('')
+    try {
+      const permissionStream = await navigator.mediaDevices.getUserMedia({ audio: true })
+      permissionStream.getTracks().forEach((track) => track.stop())
+      const devices = (await navigator.mediaDevices.enumerateDevices()).filter((device) => device.kind === 'audioinput')
+      setMicrophones(devices)
+      if (selectedMicrophoneId && !devices.some((device) => device.deviceId === selectedMicrophoneId)) {
+        setSelectedMicrophoneId('')
+        localStorage.removeItem('interact:caption-microphone')
+      }
+    } catch (error) {
+      setSettingsError(microphoneErrorMessage(error))
+    }
+  }, [selectedMicrophoneId])
+
+  useEffect(() => {
+    if (!settingsOpen) return
+    const handleDeviceChange = () => void refreshMicrophones()
+    navigator.mediaDevices.addEventListener('devicechange', handleDeviceChange)
+    return () => navigator.mediaDevices.removeEventListener('devicechange', handleDeviceChange)
+  }, [refreshMicrophones, settingsOpen])
+
+  function openPresenterSettings() {
+    setSettingsError('')
+    setSettingsOpen(true)
+    void refreshMicrophones()
+  }
+
   useEffect(() => {
     if (!lotteryEvent || lotteryEvent.payload.finalized !== false) return
     const timer = window.setTimeout(() => {
@@ -240,6 +305,7 @@ export function PresenterPage() {
           presenterToken,
           danmakuEnabled: values.danmaku_enabled,
           anonymousEnabled: values.anonymous_enabled,
+          recordingEnabled: values.recording_enabled,
           captionsEnabled: values.captions_enabled,
           captionStatus: values.caption_status,
         },
@@ -254,28 +320,37 @@ export function PresenterPage() {
     }
   }
 
-  const stopLiveCaptions = useCallback(async (persistState = true) => {
+  const stopCourseRecording = useCallback(async (persistState = true) => {
+    captionRunIdRef.current += 1
+    for (const timer of captionRetryTimersRef.current) window.clearTimeout(timer)
+    captionRetryTimersRef.current = []
+    for (const broadcaster of interpretationBroadcastersRef.current) broadcaster.close()
+    interpretationBroadcastersRef.current = []
     for (const connection of captionConnectionsRef.current) connection.close()
     captionConnectionsRef.current = []
     for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
     captionStreamRef.current = null
+    if (pendingCaptionWritesRef.current.size) {
+      await Promise.allSettled([...pendingCaptionWritesRef.current])
+    }
     setLiveCaptions({})
+    setCaptionError('')
     await captionChannelRef.current?.send({ type: 'broadcast', event: 'caption', payload: { cleared: true } })
 
     if (persistState) {
       const presenterToken = getPresenterToken(sessionId)
       if (presenterToken) {
         await requireSupabase().functions.invoke('presenter-action', {
-          body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: false, captionStatus: 'idle' },
+          body: { action: 'update_session', sessionId, presenterToken, recordingEnabled: false, captionsEnabled: false, captionStatus: 'idle' },
         })
         await loadAll()
       }
     }
   }, [loadAll, sessionId])
 
-  async function startLiveCaptions() {
-    if (!session || captionConnectionsRef.current.length) return
-    const presenterToken = getPresenterToken(session.id)
+  async function startCourseRecording(targetSession: Session | null = session, microphoneId = selectedMicrophoneId) {
+    if (!targetSession || captionConnectionsRef.current.length) return
+    const presenterToken = getPresenterToken(targetSession.id)
     if (!presenterToken) {
       setAnalysisError('找不到講者權限，請重新加入場次。')
       return
@@ -283,30 +358,60 @@ export function PresenterPage() {
 
     setBusy(true)
     setAnalysisError('')
+    setCaptionError('')
     setLiveCaptions({})
+    const runId = ++captionRunIdRef.current
     try {
       await captionChannelRef.current?.send({ type: 'broadcast', event: 'caption', payload: { cleared: true } })
       const { error: startingError } = await requireSupabase().functions.invoke('presenter-action', {
-        body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: true, captionStatus: 'starting' },
+        body: { action: 'update_session', sessionId, presenterToken, recordingEnabled: true, captionStatus: 'starting' },
       })
       if (startingError) throw startingError
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
-      })
+      const audioConstraints: MediaTrackConstraints = {
+        ...(microphoneId ? { deviceId: { exact: microphoneId } } : {}),
+        echoCancellation: true,
+        noiseSuppression: true,
+        autoGainControl: true,
+      }
+      let stream: MediaStream
+      try {
+        stream = await navigator.mediaDevices.getUserMedia({ audio: audioConstraints })
+      } catch (error) {
+        if (!microphoneId || !(error instanceof DOMException) || !['NotFoundError', 'OverconstrainedError'].includes(error.name)) throw error
+        setSelectedMicrophoneId('')
+        localStorage.removeItem('interact:caption-microphone')
+        stream = await navigator.mediaDevices.getUserMedia({
+          audio: { echoCancellation: true, noiseSuppression: true, autoGainControl: true },
+        })
+      }
       captionStreamRef.current = stream
 
       const persistCaption = async (language: string, text: string) => {
-        const { error } = await requireSupabase().functions.invoke('presenter-action', {
-          body: {
-            action: 'append_caption',
-            sessionId,
-            presenterToken,
-            language,
-            sourceLanguage: session.caption_source_language,
-            text,
-          },
-        })
-        if (error) console.error('Unable to persist caption segment', error)
+        const segmentId = crypto.randomUUID()
+        for (let attempt = 0; attempt < 2; attempt += 1) {
+          try {
+            const { error } = await requireSupabase().functions.invoke('presenter-action', {
+              body: {
+                action: 'append_caption',
+                sessionId,
+                presenterToken,
+                segmentId,
+                language,
+                sourceLanguage: targetSession.caption_source_language,
+                text,
+              },
+            })
+            if (error) throw error
+            return
+          } catch (error) {
+            if (attempt === 0) {
+              await new Promise((resolve) => window.setTimeout(resolve, 500))
+              continue
+            }
+            console.error('Unable to persist caption segment', error)
+            setCaptionError('字幕仍會顯示，但有一段逐字稿儲存失敗；請檢查網路後再結束課程。')
+          }
+        }
       }
       const onCaption = ({ language, text, final }: { language: string; text: string; final: boolean }) => {
         setLiveCaptions((current) => ({ ...current, [language]: text }))
@@ -315,59 +420,175 @@ export function PresenterPage() {
           event: 'caption',
           payload: { language, text, final, createdAt: new Date().toISOString() },
         })
-        if (final) void persistCaption(language, text)
+        if (final) {
+          const write = persistCaption(language, text)
+          pendingCaptionWritesRef.current.add(write)
+          void write.finally(() => pendingCaptionWritesRef.current.delete(write))
+        }
       }
-      const onError = (message: string) => setAnalysisError(message)
+      const onError = (message: string) => {
+        setCaptionError(message)
+        void requireSupabase().functions.invoke('presenter-action', {
+          body: { action: 'update_session', sessionId, presenterToken, captionStatus: 'error' },
+        })
+      }
 
-      const targets = session.interpretation_enabled
-        ? [...new Set(session.interpretation_languages)].filter((language) => language !== session.caption_source_language)
+      const targets = targetSession.interpretation_enabled
+        ? [...new Set(targetSession.interpretation_languages)].filter((language) => language !== targetSession.caption_source_language)
         : []
-      const connections = await Promise.all([
-        createRealtimeCaptionConnection({
+      const transcriptionConnection = await createRealtimeCaptionConnection({
           sessionId,
           presenterToken,
           mode: 'transcription',
-          language: session.caption_source_language,
-          sourceLanguage: session.caption_source_language,
+          language: targetSession.caption_source_language,
+          sourceLanguage: targetSession.caption_source_language,
           stream,
           onCaption,
           onError,
-        }),
-        ...targets.map((language) => createRealtimeCaptionConnection({
-          sessionId,
-          presenterToken,
-          mode: 'translation',
-          language,
-          sourceLanguage: session.caption_source_language,
-          stream,
-          onCaption,
-          onError,
-        })),
-      ])
-      captionConnectionsRef.current = connections
+        })
+      captionConnectionsRef.current = [transcriptionConnection]
+      const connectTranslation = async (language: string, retryCount = 0): Promise<void> => {
+        if (captionRunIdRef.current !== runId) return
+        let translationConnection: { close: () => void } | null = null
+        let retryScheduled = false
+        try {
+          translationConnection = await createRealtimeCaptionConnection({
+            sessionId,
+            presenterToken,
+            mode: 'translation',
+            language,
+            sourceLanguage: targetSession.caption_source_language,
+            stream,
+            onTranslatedAudio: targetSession.interpretation_audio_enabled
+              ? (translatedStream) => {
+                  void createInterpretationAudioBroadcaster(sessionId, language, translatedStream, (message) => {
+                    setCaptionError(`${language.toUpperCase()} 語音口譯：${message}`)
+                  })
+                    .then((broadcaster) => interpretationBroadcastersRef.current.push(broadcaster))
+                    .catch((error: unknown) => setCaptionError(error instanceof Error ? error.message : '即時語音口譯廣播失敗。'))
+                }
+              : undefined,
+            onCaption,
+            onError: (message) => {
+              const retryDelay = realtimeRetryDelay(message)
+              if (!retryScheduled && retryDelay !== null && retryCount < 2 && captionRunIdRef.current === runId) {
+                retryScheduled = true
+                setCaptionError(`${language.toUpperCase()} 即時口譯連線忙碌，正在自動重連…`)
+                const timer = window.setTimeout(() => {
+                  captionRetryTimersRef.current = captionRetryTimersRef.current.filter((item) => item !== timer)
+                  translationConnection?.close()
+                  if (translationConnection) {
+                    captionConnectionsRef.current = captionConnectionsRef.current.filter((item) => item !== translationConnection)
+                  }
+                  void connectTranslation(language, retryCount + 1)
+                }, retryDelay)
+                captionRetryTimersRef.current.push(timer)
+                return
+              }
+              setCaptionError(`${language.toUpperCase()} 即時口譯：${readableRealtimeError(message)}`)
+            },
+          })
+          if (captionRunIdRef.current !== runId) {
+            translationConnection.close()
+            return
+          }
+          captionConnectionsRef.current.push(translationConnection)
+        } catch (error) {
+          const message = error instanceof Error ? error.message : '即時口譯連線失敗。'
+          const retryDelay = realtimeRetryDelay(message)
+          if (retryDelay !== null && retryCount < 2 && captionRunIdRef.current === runId) {
+            setCaptionError(`${language.toUpperCase()} 即時口譯連線忙碌，正在自動重連…`)
+            const timer = window.setTimeout(() => {
+              captionRetryTimersRef.current = captionRetryTimersRef.current.filter((item) => item !== timer)
+              void connectTranslation(language, retryCount + 1)
+            }, retryDelay)
+            captionRetryTimersRef.current.push(timer)
+            return
+          }
+          setCaptionError(`${language.toUpperCase()} 即時口譯：${readableRealtimeError(message)}`)
+        }
+      }
+      for (const language of targets) await connectTranslation(language)
       const { error: liveError } = await requireSupabase().functions.invoke('presenter-action', {
         body: { action: 'update_session', sessionId, presenterToken, captionStatus: 'live' },
       })
       if (liveError) throw liveError
       await loadAll()
     } catch (error) {
-      await stopLiveCaptions(false)
+      await stopCourseRecording(false)
       await requireSupabase().functions.invoke('presenter-action', {
-        body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: false, captionStatus: 'error' },
+        body: { action: 'update_session', sessionId, presenterToken, recordingEnabled: false, captionsEnabled: false, captionStatus: 'error' },
       })
-      setAnalysisError(error instanceof Error ? error.message : '即時字幕啟動失敗。')
+      const message = microphoneErrorMessage(error)
+      setCaptionError(message || '課程錄製啟動失敗。')
       await loadAll()
     } finally {
       setBusy(false)
     }
   }
 
-  async function toggleLiveCaptions() {
-    if (captionConnectionsRef.current.length) await stopLiveCaptions()
-    else await startLiveCaptions()
+  async function toggleCourseRecording() {
+    if (captionConnectionsRef.current.length) await stopCourseRecording()
+    else await startCourseRecording()
+  }
+
+  async function toggleCaptionVisibility() {
+    if (!session?.recording_enabled) return
+    await updateSession({ captions_enabled: !session.captions_enabled })
+  }
+
+  async function savePresenterSettings(settings: PresenterCaptionSettings, microphoneId: string) {
+    if (!session) return
+    const presenterToken = getPresenterToken(session.id)
+    if (!presenterToken) {
+      setSettingsError('找不到講師權限，請重新加入場次。')
+      return
+    }
+
+    setSettingsBusy(true)
+    setSettingsError('')
+    const captionsWereActive = captionConnectionsRef.current.length > 0
+    const captionsWereVisible = session.captions_enabled
+    try {
+      if (captionsWereActive) await stopCourseRecording()
+      const { data, error } = await requireSupabase().functions.invoke('presenter-action', {
+        body: {
+          action: 'update_session',
+          sessionId,
+          presenterToken,
+          captionSourceLanguage: settings.sourceLanguage,
+          captionFontSize: settings.fontSize,
+          captionFontBold: settings.fontBold,
+          interpretationAudioEnabled: settings.interpretationAudioEnabled,
+          interpretationLanguages: settings.interpretationLanguages,
+        },
+      })
+      if (error) throw error
+      if (!data?.session) throw new Error(data?.message || '字幕設定儲存失敗。')
+      const nextSession = data.session as Session
+      setSession(nextSession)
+      setSelectedMicrophoneId(microphoneId)
+      if (microphoneId) localStorage.setItem('interact:caption-microphone', microphoneId)
+      else localStorage.removeItem('interact:caption-microphone')
+      setSettingsOpen(false)
+      if (captionsWereActive) {
+        await startCourseRecording(nextSession, microphoneId)
+        if (captionsWereVisible) {
+          await requireSupabase().functions.invoke('presenter-action', {
+            body: { action: 'update_session', sessionId, presenterToken, captionsEnabled: true },
+          })
+          await loadAll()
+        }
+      } else await loadAll()
+    } catch (error) {
+      setSettingsError(error instanceof Error ? error.message : '字幕設定儲存失敗。')
+    } finally {
+      setSettingsBusy(false)
+    }
   }
 
   useEffect(() => () => {
+    for (const broadcaster of interpretationBroadcastersRef.current) broadcaster.close()
     for (const connection of captionConnectionsRef.current) connection.close()
     for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
   }, [])
@@ -877,7 +1098,7 @@ export function PresenterPage() {
 
     setBusy(true)
     try {
-      if (captionConnectionsRef.current.length) await stopLiveCaptions()
+      if (captionConnectionsRef.current.length) await stopCourseRecording()
       if (window.interactDesktop) {
         await window.interactDesktop.openSessionReport(sessionId, true)
       } else {
@@ -905,7 +1126,7 @@ export function PresenterPage() {
     setClosingSession(true)
     setAnalysisError('')
     try {
-      if (captionConnectionsRef.current.length) await stopLiveCaptions()
+      if (captionConnectionsRef.current.length) await stopCourseRecording()
       await endManagedSession(sessionId, presenterToken)
       await window.interactDesktop?.close()
     } catch (error) {
@@ -919,7 +1140,7 @@ export function PresenterPage() {
     setClosingSession(true)
     setAnalysisError('')
     try {
-      if (captionConnectionsRef.current.length) await stopLiveCaptions()
+      if (captionConnectionsRef.current.length) await stopCourseRecording()
       await window.interactDesktop?.close()
     } catch (error) {
       setCloseConfirmOpen(false)
@@ -965,6 +1186,7 @@ export function PresenterPage() {
         <PresenterControlPanel
           busy={busy}
           buzzerActive={isBuzzerPending(buzzerEvent)}
+          captionError={captionError}
           onlineCount={onlineParticipants.length}
           session={session}
           onDrawLottery={drawLottery}
@@ -979,8 +1201,10 @@ export function PresenterPage() {
             setTextDispatchError('')
             setTextDispatchOpen(true)
           }}
+          onOpenSettings={openPresenterSettings}
           onOpenWordCloud={openWordCloud}
-          onToggleCaptions={toggleLiveCaptions}
+          onToggleRecording={toggleCourseRecording}
+          onToggleCaptionVisibility={toggleCaptionVisibility}
         />
         <QuestionHistory
           activeQuestionId={session.current_question_id}
@@ -1015,11 +1239,12 @@ export function PresenterPage() {
         )}
       </aside>
       )}
-      {session.captions_enabled && (
+      {!window.interactDesktop && session.captions_enabled && (
         <LiveCaptionOverlay
-          language={session.caption_display_language}
+          fontBold={session.caption_font_bold}
+          fontSize={session.caption_font_size}
           status={session.caption_status}
-          text={liveCaptions[session.caption_display_language] || liveCaptions[session.caption_source_language] || ''}
+          text={liveCaptions[session.caption_source_language] || ''}
         />
       )}
       {selectionMode && (
@@ -1062,6 +1287,19 @@ export function PresenterPage() {
         open={textDispatchOpen}
         onCancel={() => setTextDispatchOpen(false)}
         onSend={sendSharedContent}
+      />
+      <PresenterSettingsModal
+        busy={settingsBusy}
+        error={settingsError}
+        microphones={microphones}
+        open={settingsOpen}
+        selectedMicrophoneId={selectedMicrophoneId}
+        session={session}
+        onClose={() => {
+          if (!settingsBusy) setSettingsOpen(false)
+        }}
+        onRefreshMicrophones={() => void refreshMicrophones()}
+        onSave={(settings, microphoneId) => void savePresenterSettings(settings, microphoneId)}
       />
       <ConfirmDialog
         busy={busy}

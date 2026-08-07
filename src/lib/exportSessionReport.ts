@@ -140,6 +140,9 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
 
   addOverviewSection(overview, 'AI 整節課分析', [
     ['總結', analysis.executive_summary],
+    ...(analysis.lesson_key_points?.length
+      ? [['課堂重點整理', listText(analysis.lesson_key_points)] as [string, string]]
+      : []),
     ['互動程度', analysis.engagement_analysis.level],
     ['互動分析', analysis.engagement_analysis.summary],
     ['參與觀察', listText(analysis.engagement_analysis.participation_observations)],

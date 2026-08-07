@@ -370,6 +370,13 @@ h2 {
   line-height: 1.5;
 }
 
+.interpretation-audio-toggle {
+  background: var(--primary-soft);
+  border: 1px solid rgb(40 142 113 / 25%);
+  border-radius: var(--radius-sm);
+  padding: 11px 12px;
+}
+
 .form-heading-icon,
 .heading-icon,
 .metric-icon {
@@ -871,6 +878,12 @@ h2 {
   color: #fff;
 }
 
+.caption-control-error {
+  font-size: 12px;
+  line-height: 1.45;
+  margin: 0;
+}
+
 .live-caption-overlay {
   align-items: flex-start;
   background: rgb(10 15 28 / 92%);
@@ -904,6 +917,31 @@ h2 {
   font-size: clamp(20px, 2.4vw, 32px);
   font-weight: 800;
   line-height: 1.35;
+}
+
+.desktop-overlay-root .live-caption-overlay {
+  align-items: center;
+  background: rgb(255 255 255 / 88%);
+  border: 1px solid rgb(223 226 232 / 85%);
+  border-radius: var(--radius-md);
+  bottom: 48px;
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+  left: 50%;
+  max-width: min(1400px, calc(100vw - 96px));
+  padding: 12px 18px;
+  width: max-content;
+  z-index: 3;
+}
+
+.desktop-overlay-root .live-caption-language {
+  color: var(--share-dark);
+  font-size: 16px;
+}
+
+.desktop-overlay-root .live-caption-overlay p {
+  font-size: clamp(28px, 3vw, 48px);
+  font-weight: 700;
 }
 
 .energy-control-action:hover {
@@ -1544,6 +1582,59 @@ h2 {
   font-weight: 750;
   line-height: 1.5;
   min-height: 33px;
+}
+
+.participant-interpretation-audio {
+  display: grid;
+  gap: 12px;
+}
+
+.participant-interpretation-heading {
+  align-items: center;
+  display: flex;
+  justify-content: space-between;
+}
+
+.participant-interpretation-heading > span {
+  align-items: center;
+  color: var(--primary-dark);
+  display: inline-flex;
+  font-weight: 850;
+  gap: 7px;
+}
+
+.participant-interpretation-audio label {
+  display: grid;
+  gap: 6px;
+}
+
+.participant-interpretation-audio button {
+  justify-self: start;
+}
+
+.interpretation-language-buttons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.interpretation-language-buttons button {
+  min-height: 40px;
+  padding: 8px 12px;
+}
+
+.interpretation-language-buttons button.is-active {
+  background: var(--primary);
+  border-color: var(--primary);
+  color: #fff;
+}
+
+.participant-interpretation-audio > p {
+  font-size: 13px;
+}
+
+.interpretation-playing-icon {
+  color: var(--success);
 }
 
 @media (max-width: 560px) {
@@ -2227,6 +2318,85 @@ h2 {
 
 .text-dispatch-modal {
   max-width: 620px;
+}
+
+.presenter-settings-backdrop {
+  z-index: 45;
+}
+
+.presenter-settings-modal {
+  max-width: 680px;
+}
+
+.presenter-settings-modal .modal-heading h2,
+.presenter-settings-section-heading,
+.presenter-settings-section-heading > span,
+.microphone-meter-row {
+  align-items: center;
+  display: flex;
+}
+
+.presenter-settings-modal .modal-heading h2 {
+  gap: 8px;
+}
+
+.presenter-settings-section {
+  background: var(--surface-subtle);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.presenter-settings-section-heading {
+  justify-content: space-between;
+}
+
+.presenter-settings-section-heading > span {
+  color: var(--text);
+  font-size: 14px;
+  font-weight: 800;
+  gap: 7px;
+}
+
+.settings-refresh-button {
+  font-size: 12px;
+  min-height: 32px;
+  padding: 5px 9px;
+}
+
+.microphone-meter-row {
+  gap: 10px;
+}
+
+.microphone-meter-row > span:first-child {
+  color: var(--muted);
+  flex: 0 0 auto;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.microphone-meter {
+  background: var(--track);
+  border-radius: 999px;
+  flex: 1;
+  height: 9px;
+  overflow: hidden;
+}
+
+.microphone-meter > span {
+  background: linear-gradient(90deg, var(--success), var(--energy));
+  border-radius: inherit;
+  display: block;
+  height: 100%;
+  min-width: 2px;
+  transition: width 80ms linear;
+}
+
+.compact-error {
+  font-size: 12px;
+  margin: 0;
 }
 
 .shared-content-section {

@@ -45,11 +45,14 @@ function configureWebContents(window) {
 
 let mainWindow = null
 let overlayWindow = null
+let overlayKeepAliveTimer = null
+let overlayVisibilitySuppressed = false
 let reportWindow = null
 let wordCloudWindow = null
 let lastControlBounds = null
 let isQuitting = false
 let latestLotteryEvent = null
+let presenterTopmostEnabled = false
 
 function appUrl(hash) {
   return isDesktopDev ? `http://127.0.0.1:5173/#${hash}` : null
@@ -119,16 +122,29 @@ function createWindow() {
 
   mainWindow.on('closed', () => {
     mainWindow = null
-    overlayWindow?.close()
-    overlayWindow = null
+    closeOverlayWindow()
     wordCloudWindow?.close()
     wordCloudWindow = null
   })
 }
 
 function setPresenterTopmost(enabled) {
+  presenterTopmostEnabled = Boolean(enabled)
   if (!mainWindow || mainWindow.isDestroyed()) return
   mainWindow.setAlwaysOnTop(enabled, TOPMOST_LEVEL, enabled ? CONTROL_RELATIVE_LEVEL : 0)
+}
+
+function reinforcePresenterTopmost() {
+  if (
+    !presenterTopmostEnabled
+    || !mainWindow
+    || mainWindow.isDestroyed()
+    || mainWindow.isMinimized()
+    || !mainWindow.isVisible()
+    || reportWindow
+  ) return
+  mainWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, CONTROL_RELATIVE_LEVEL)
+  mainWindow.moveTop()
 }
 
 function bringControlToFront(focus = false) {
@@ -142,24 +158,54 @@ function bringControlToFront(focus = false) {
 }
 
 function showOverlayInactive() {
-  if (!overlayWindow || overlayWindow.isDestroyed()) return
+  if (overlayVisibilitySuppressed || !overlayWindow || overlayWindow.isDestroyed()) return
 
   overlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
   overlayWindow.showInactive()
   overlayWindow.moveTop()
 }
 
+function stopOverlayKeepAlive() {
+  if (overlayKeepAliveTimer) clearInterval(overlayKeepAliveTimer)
+  overlayKeepAliveTimer = null
+}
+
+function startOverlayKeepAlive() {
+  stopOverlayKeepAlive()
+  overlayKeepAliveTimer = setInterval(() => {
+    reinforcePresenterTopmost()
+    if (overlayVisibilitySuppressed || !overlayWindow || overlayWindow.isDestroyed()) return
+    const targetDisplay = displayForBounds(mainWindow?.getBounds())
+    const bounds = overlayWindow.getBounds()
+    if (
+      bounds.x !== targetDisplay.bounds.x
+      || bounds.y !== targetDisplay.bounds.y
+      || bounds.width !== targetDisplay.bounds.width
+      || bounds.height !== targetDisplay.bounds.height
+    ) overlayWindow.setBounds(targetDisplay.bounds, false)
+    showOverlayInactive()
+  }, 750)
+}
+
+function closeOverlayWindow() {
+  stopOverlayKeepAlive()
+  const target = overlayWindow
+  overlayWindow = null
+  if (target && !target.isDestroyed()) target.close()
+}
+
 function createOverlayWindow(sessionId) {
-  overlayWindow?.close()
+  closeOverlayWindow()
+  overlayVisibilitySuppressed = false
   latestLotteryEvent = null
   const targetDisplay = displayForBounds(mainWindow?.getBounds())
 
-  overlayWindow = new BrowserWindow({
+  const nextOverlayWindow = new BrowserWindow({
     ...targetDisplay.bounds,
     frame: false,
     transparent: true,
     alwaysOnTop: true,
-    focusable: true,
+    focusable: false,
     hasShadow: false,
     resizable: false,
     maximizable: false,
@@ -168,23 +214,29 @@ function createOverlayWindow(sessionId) {
     backgroundColor: '#00000000',
     webPreferences: {
       contextIsolation: true,
+      backgroundThrottling: false,
       nodeIntegration: false,
       sandbox: true,
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
-  configureWebContents(overlayWindow)
+  overlayWindow = nextOverlayWindow
+  configureWebContents(nextOverlayWindow)
 
-  overlayWindow.setIgnoreMouseEvents(true, { forward: true })
-  overlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
-  overlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
-  loadAppRoute(overlayWindow, `/desktop-overlay/${sessionId}`)
-  overlayWindow.once('ready-to-show', () => {
+  nextOverlayWindow.setIgnoreMouseEvents(true, { forward: true })
+  nextOverlayWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, OVERLAY_RELATIVE_LEVEL)
+  nextOverlayWindow.setVisibleOnAllWorkspaces(true, { visibleOnFullScreen: true })
+  loadAppRoute(nextOverlayWindow, `/desktop-overlay/${sessionId}`)
+  nextOverlayWindow.once('ready-to-show', () => {
     showOverlayInactive()
+    startOverlayKeepAlive()
     setTimeout(bringControlToFront, 60)
   })
-  overlayWindow.on('closed', () => {
-    overlayWindow = null
+  nextOverlayWindow.on('closed', () => {
+    if (overlayWindow === nextOverlayWindow) {
+      overlayWindow = null
+      stopOverlayKeepAlive()
+    }
   })
 }
 
@@ -198,6 +250,7 @@ function createReportWindow(sessionId, generate = false) {
   }
 
   mainWindow?.hide()
+  overlayVisibilitySuppressed = true
   overlayWindow?.hide()
 
   reportWindow = new BrowserWindow({
@@ -291,6 +344,7 @@ function createWordCloudWindow(sessionId) {
 
   loadAppRoute(wordCloudWindow, `/word-cloud/${sessionId}`)
   wordCloudWindow.once('ready-to-show', () => {
+    overlayVisibilitySuppressed = true
     overlayWindow?.hide()
     wordCloudWindow?.show()
     wordCloudWindow?.moveTop()
@@ -298,6 +352,7 @@ function createWordCloudWindow(sessionId) {
   })
   wordCloudWindow.on('closed', () => {
     wordCloudWindow = null
+    overlayVisibilitySuppressed = false
     showOverlayInactive()
     setTimeout(() => bringControlToFront(false), 60)
   })
@@ -374,6 +429,7 @@ ipcMain.handle('lottery:set-interactive', (_event, enabled) => {
     overlayWindow.show()
     overlayWindow.focus()
   } else {
+    overlayWindow.setFocusable(false)
     showOverlayInactive()
     setTimeout(bringControlToFront, 60)
   }
@@ -408,8 +464,7 @@ ipcMain.handle('window:return-from-session-report', async (event) => {
 
   reportWindow = null
   targetWindow.destroy()
-  overlayWindow?.close()
-  overlayWindow = null
+  closeOverlayWindow()
   setPresenterTopmost(false)
 
   if (mainWindow && !mainWindow.isDestroyed()) {
@@ -433,6 +488,7 @@ ipcMain.handle('capture:start-selection', async () => {
   lastControlBounds = mainWindow.getBounds()
   const targetDisplay = displayForBounds(lastControlBounds)
   mainWindow.hide()
+  overlayVisibilitySuppressed = true
   overlayWindow?.hide()
   await new Promise((resolve) => setTimeout(resolve, 160))
 
@@ -451,6 +507,7 @@ ipcMain.handle('capture:start-selection', async () => {
 
 ipcMain.handle('capture:finish-selection', (_event, expanded = true) => {
   setControlBounds(Boolean(expanded))
+  overlayVisibilitySuppressed = false
   showOverlayInactive()
   setTimeout(() => {
     showOverlayInactive()
@@ -460,6 +517,10 @@ ipcMain.handle('capture:finish-selection', (_event, expanded = true) => {
 
 app.whenReady().then(() => {
   createWindow()
+
+  for (const eventName of ['display-added', 'display-removed', 'display-metrics-changed']) {
+    screen.on(eventName, () => showOverlayInactive())
+  }
 
   app.on('activate', () => {
     if (reportWindow && !reportWindow.isDestroyed()) {
@@ -475,6 +536,7 @@ app.whenReady().then(() => {
 
 app.on('before-quit', () => {
   isQuitting = true
+  stopOverlayKeepAlive()
 })
 
 app.on('window-all-closed', () => {

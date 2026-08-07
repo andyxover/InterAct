@@ -12,15 +12,20 @@ create table if not exists public.sessions (
   exit_ticket_prompt text null,
   exit_ticket_category text null check (exit_ticket_category in ('lesson_summary', 'learning_assessment', 'course_satisfaction', 'student_question')),
   exit_ticket_response_type text null check (exit_ticket_response_type in ('text', 'rating')),
+  recording_enabled boolean not null default false,
   captions_enabled boolean not null default false,
   caption_status text not null default 'idle' check (caption_status in ('idle', 'starting', 'live', 'error')),
   caption_source_language text not null default 'zh-tw',
   caption_display_language text not null default 'zh-tw',
+  caption_font_size integer not null default 48 check (caption_font_size between 24 and 96),
+  caption_font_bold boolean not null default true,
   caption_started_at timestamptz null,
   interpretation_enabled boolean not null default false,
+  interpretation_audio_enabled boolean not null default false,
   interpretation_languages text[] not null default '{}'::text[],
   created_at timestamptz not null default now(),
-  ended_at timestamptz null
+  ended_at timestamptz null,
+  constraint sessions_captions_require_recording check (not captions_enabled or recording_enabled)
 );
 
 create table if not exists public.participants (

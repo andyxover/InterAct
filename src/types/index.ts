@@ -10,12 +10,16 @@ export type Session = {
   exit_ticket_prompt: string | null
   exit_ticket_category: ExitTicketCategory | null
   exit_ticket_response_type: ExitTicketResponseType | null
+  recording_enabled: boolean
   captions_enabled: boolean
   caption_status: 'idle' | 'starting' | 'live' | 'error'
   caption_source_language: string
   caption_display_language: string
+  caption_font_size: number
+  caption_font_bold: boolean
   caption_started_at: string | null
   interpretation_enabled: boolean
+  interpretation_audio_enabled: boolean
   interpretation_languages: string[]
   created_at: string
   ended_at: string | null
@@ -227,6 +231,7 @@ export type SessionMetrics = {
 
 export type SessionAnalysis = {
   executive_summary: string
+  lesson_key_points: string[]
   engagement_analysis: {
     level: 'high' | 'medium' | 'low'
     summary: string

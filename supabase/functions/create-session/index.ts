@@ -2,10 +2,11 @@ import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
-const captionLanguages = new Set(['zh-tw', 'zh-cn', 'en', 'ja', 'ko', 'es', 'fr', 'de', 'th', 'vi', 'id'])
+const speakerLanguages = new Set(['zh-tw', 'en'])
+const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
 
-function normalizedLanguage(value: unknown, fallback = 'zh-tw') {
-  return typeof value === 'string' && captionLanguages.has(value) ? value : fallback
+function normalizedLanguage(value: unknown, supported: Set<string>, fallback = 'zh-tw') {
+  return typeof value === 'string' && supported.has(value) ? value : fallback
 }
 
 function createCode() {
@@ -36,14 +37,13 @@ Deno.serve(async (req) => {
   try {
     const input = await req.json()
     const title = typeof input.title === 'string' ? input.title.trim().slice(0, 120) : ''
-    const sourceLanguage = normalizedLanguage(input.captionSourceLanguage)
-    const displayLanguage = normalizedLanguage(input.captionDisplayLanguage, sourceLanguage)
+    const sourceLanguage = normalizedLanguage(input.captionSourceLanguage, speakerLanguages)
     const interpretationLanguages = Array.isArray(input.interpretationLanguages)
       ? [...new Set(input.interpretationLanguages.filter((language: unknown): language is string => (
-        typeof language === 'string' && captionLanguages.has(language) && language !== sourceLanguage
-      )))].slice(0, 4)
+        typeof language === 'string' && interpretationLanguagesSupported.has(language) && language !== sourceLanguage
+      )))].slice(0, 3)
       : []
-    const interpretationEnabled = Boolean(input.interpretationEnabled) && interpretationLanguages.length > 0
+    const interpretationAudioEnabled = Boolean(input.interpretationAudioEnabled) && interpretationLanguages.length > 0
     const presenterToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll('-', '')
     const tokenHash = await hashPresenterToken(presenterToken)
     const supabase = getAdminClient()
@@ -55,10 +55,15 @@ Deno.serve(async (req) => {
         .insert({
           title: title || '未命名場次',
           code: createCode(),
+          recording_enabled: false,
+          captions_enabled: false,
           caption_source_language: sourceLanguage,
-          caption_display_language: displayLanguage,
-          interpretation_enabled: interpretationEnabled,
-          interpretation_languages: interpretationEnabled ? interpretationLanguages : [],
+          caption_display_language: sourceLanguage,
+          caption_font_size: 48,
+          caption_font_bold: true,
+          interpretation_enabled: interpretationAudioEnabled,
+          interpretation_audio_enabled: interpretationAudioEnabled,
+          interpretation_languages: interpretationAudioEnabled ? interpretationLanguages : [],
         })
         .select('id, code')
         .single()

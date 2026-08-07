@@ -1,18 +1,15 @@
-import { Captions } from 'lucide-react'
-import { captionLanguageLabel } from '../lib/captionLanguages'
-
 type Props = {
-  language: string
+  fontBold?: boolean
+  fontSize?: number
   text: string
   status?: 'idle' | 'starting' | 'live' | 'error'
 }
 
-export function LiveCaptionOverlay({ language, text, status = 'live' }: Props) {
+export function LiveCaptionOverlay({ fontBold = true, fontSize = 48, text, status = 'live' }: Props) {
   if (!text && status !== 'starting') return null
   return (
     <div className="live-caption-overlay" aria-live="polite">
-      <span className="live-caption-language"><Captions size={16} />{captionLanguageLabel(language)}</span>
-      <p>{text || '正在連接麥克風...'}</p>
+      <p style={{ fontSize: `${fontSize}px`, fontWeight: fontBold ? 800 : 400 }}>{text || '正在連接麥克風...'}</p>
     </div>
   )
 }
