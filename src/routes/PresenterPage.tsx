@@ -21,6 +21,7 @@ import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
 import { createRealtimeCaptionConnection } from '../lib/liveCaptions'
 import { createInterpretationAudioBroadcaster } from '../lib/liveInterpretation'
+import { createCaptionTextNormalizer } from '../lib/traditionalChinese'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
 import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
@@ -385,6 +386,9 @@ export function PresenterPage() {
         })
       }
       captionStreamRef.current = stream
+      const normalizeCaptionText = await createCaptionTextNormalizer(
+        targetSession.caption_source_language === 'zh-tw' || targetSession.interpretation_languages.includes('zh-tw'),
+      )
 
       const persistCaption = async (language: string, text: string) => {
         const segmentId = crypto.randomUUID()
@@ -414,14 +418,15 @@ export function PresenterPage() {
         }
       }
       const onCaption = ({ language, text, final }: { language: string; text: string; final: boolean }) => {
-        setLiveCaptions((current) => ({ ...current, [language]: text }))
+        const normalizedText = normalizeCaptionText(language, text)
+        setLiveCaptions((current) => ({ ...current, [language]: normalizedText }))
         void captionChannelRef.current?.send({
           type: 'broadcast',
           event: 'caption',
-          payload: { language, text, final, createdAt: new Date().toISOString() },
+          payload: { language, text: normalizedText, final, createdAt: new Date().toISOString() },
         })
         if (final) {
-          const write = persistCaption(language, text)
+          const write = persistCaption(language, normalizedText)
           pendingCaptionWritesRef.current.add(write)
           void write.finally(() => pendingCaptionWritesRef.current.delete(write))
         }
