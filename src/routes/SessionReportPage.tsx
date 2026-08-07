@@ -3,7 +3,7 @@ import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, 
 import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
-import type { AiSummary, Answer, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
@@ -85,6 +85,13 @@ export function SessionReportPage() {
       fetchAllRows<ExitTicket>('exit_tickets', sessionId, 'submitted_at'),
     ])
 
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) throw new Error('找不到這個場次的講者權限，無法讀取錄音評測。')
+    const { data: recordingData, error: recordingError } = await supabase.functions.invoke('presenter-action', {
+      body: { action: 'get_session_recording_results', sessionId, presenterToken },
+    })
+    if (recordingError) throw new Error(await edgeFunctionMessage(recordingError))
+
     setReportData({
       session: session as Session,
       participants,
@@ -93,6 +100,7 @@ export function SessionReportPage() {
       screenshots,
       questions,
       answers,
+      audioResponses: (recordingData?.responses || []) as AudioResponse[],
       aiSummaries,
       exitTickets,
     })
@@ -278,6 +286,33 @@ export function SessionReportPage() {
             </table>
           </div>
         ) : <p className="muted">本場次沒有派送文字或連結。</p>}
+      </section>
+
+      <section className="report-section">
+        <h2>錄音評測</h2>
+        {reportData.audioResponses.length ? (
+          <div className="report-table-wrap">
+            <table className="report-table">
+              <thead><tr><th>題次／題型</th><th>姓名</th><th>語言／分數</th><th>AI 分析</th><th>優點</th><th>改善建議</th></tr></thead>
+              <tbody>
+                {reportData.audioResponses.map((response) => {
+                  const item = response.analysis_json
+                  const meta = questionMeta.get(response.question_id)
+                  return (
+                    <tr key={response.id}>
+                      <td>{meta ? `${meta.number}．${meta.type}` : '—'}</td>
+                      <td>{response.participant_name}</td>
+                      <td>{response.detected_language || '—'}<br />{typeof response.score === 'number' ? `${response.score} 分` : '分析未完成'}</td>
+                      <td>{item?.summary || response.error_message || '—'}</td>
+                      <td>{item?.strengths.join('、') || '—'}</td>
+                      <td>{item?.improvements.join('、') || '—'}</td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
+        ) : <p className="muted">本場次沒有錄音評測。</p>}
       </section>
 
       <div className="report-two-column">

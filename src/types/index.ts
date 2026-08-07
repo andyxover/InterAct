@@ -200,6 +200,9 @@ export type SessionMetrics = {
   correct_answer_count: number
   correct_rate: number | null
   exit_ticket_count: number
+  audio_response_count: number
+  analyzed_audio_count: number
+  average_audio_score: number | null
   duration_minutes: number
 }
 
@@ -264,6 +267,7 @@ export type SessionReportData = {
   screenshots: Screenshot[]
   questions: Question[]
   answers: Answer[]
+  audioResponses: AudioResponse[]
   aiSummaries: AiSummary[]
   exitTickets: ExitTicket[]
 }

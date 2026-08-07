@@ -129,6 +129,9 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
     ['答對數', metrics.correct_answer_count],
     ['整體正確率', metrics.correct_rate === null ? '尚未設定正確答案' : metrics.correct_rate / 100],
     ['Exit Ticket 份數', metrics.exit_ticket_count],
+    ['錄音作答數', metrics.audio_response_count],
+    ['錄音完成分析數', metrics.analyzed_audio_count],
+    ['錄音平均分數', metrics.average_audio_score ?? '尚無完成的錄音分析'],
     ['文字／連結派送數', data.sharedContents.length],
   ])
   const interactionStart = 11
@@ -251,6 +254,46 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
   }
   answers.getColumn('submittedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
   styleTableSheet(answers)
+
+  const audioResponses = workbook.addWorksheet('錄音評測')
+  audioResponses.columns = [
+    { header: '題次', key: 'questionNumber', width: 8 },
+    { header: '題型', key: 'questionType', width: 14 },
+    { header: '姓名', key: 'participantName', width: 20 },
+    { header: '辨識語言', key: 'language', width: 16 },
+    { header: '分數', key: 'score', width: 10 },
+    { header: '逐字稿', key: 'transcript', width: 55 },
+    { header: 'AI 分析', key: 'summary', width: 55 },
+    { header: '內容對照', key: 'relevance', width: 45 },
+    { header: '表達清晰度', key: 'clarity', width: 45 },
+    { header: '完成度', key: 'completeness', width: 45 },
+    { header: '優點', key: 'strengths', width: 45 },
+    { header: '改善建議', key: 'improvements', width: 50 },
+    { header: '分析限制', key: 'limitations', width: 40 },
+    { header: '送出時間', key: 'submittedAt', width: 22 },
+  ]
+  for (const response of data.audioResponses) {
+    const question = questionById.get(response.question_id)
+    const item = response.analysis_json
+    audioResponses.addRow({
+      questionNumber: questionNumber.get(response.question_id) || '',
+      questionType: question ? questionTypeLabels[question.type] : '',
+      participantName: response.participant_name,
+      language: response.detected_language || '',
+      score: response.score ?? '',
+      transcript: response.transcript || '',
+      summary: item?.summary || response.error_message || '',
+      relevance: item?.relevance || '',
+      clarity: item?.clarity || '',
+      completeness: item?.completeness || '',
+      strengths: item?.strengths.join('\n') || '',
+      improvements: item?.improvements.join('\n') || '',
+      limitations: item?.limitations.join('\n') || '',
+      submittedAt: formatDate(response.submitted_at),
+    })
+  }
+  audioResponses.getColumn('submittedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
+  styleTableSheet(audioResponses)
 
   const messages = workbook.addWorksheet('彈幕')
   messages.columns = [

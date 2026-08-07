@@ -282,6 +282,16 @@ Deno.serve(async (req) => {
       return jsonResponse({ responses: signedResponses })
     }
 
+    if (action === 'get_session_recording_results') {
+      const { data: responses, error } = await supabase
+        .from('audio_responses')
+        .select('id, session_id, question_id, participant_id, participant_name, mime_type, duration_ms, analysis_status, detected_language, transcript, score, analysis_json, error_message, submitted_at, analyzed_at')
+        .eq('session_id', sessionId)
+        .order('submitted_at')
+      if (error) throw error
+      return jsonResponse({ responses: responses || [] })
+    }
+
     if (action === 'grade_question') {
       const questionId = input.questionId
       if (!validUuid(questionId)) return jsonResponse({ message: '題目資料格式不正確。' }, 400)

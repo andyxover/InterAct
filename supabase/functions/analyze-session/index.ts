@@ -114,21 +114,22 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (cached?.input_json?.analysis_version === 2) {
+    if (cached?.input_json?.analysis_version === 3) {
       return jsonResponse({ analysis: cached.output_json, metrics: cached.input_json?.metrics, cached: true })
     }
 
-    const [participantResult, messageResult, sharedContentResult, questionResult, answerResult, questionAnalysisResult, exitTicketResult] = await Promise.all([
+    const [participantResult, messageResult, sharedContentResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult] = await Promise.all([
       supabase.from('participants').select('id').eq('session_id', sessionId).order('joined_at').limit(5000),
       supabase.from('messages').select('participant_id, content, created_at').eq('session_id', sessionId).order('created_at').limit(5000),
       supabase.from('shared_contents').select('body, url, created_at').eq('session_id', sessionId).order('created_at').limit(1000),
       supabase.from('questions').select('*').eq('session_id', sessionId).order('created_at').limit(500),
       supabase.from('answers').select('question_id, participant_id, answer_value, answer_values, answer_text, is_correct').eq('session_id', sessionId).order('submitted_at').limit(10000),
+      supabase.from('audio_responses').select('question_id, analysis_status, detected_language, transcript, score, analysis_json, submitted_at').eq('session_id', sessionId).order('submitted_at').limit(10000),
       supabase.from('ai_summaries').select('question_id, output_json').eq('session_id', sessionId).eq('type', 'question_analysis').eq('status', 'success').order('created_at').limit(500),
       supabase.from('exit_tickets').select('most_useful, still_confused, understanding_score, engagement_score, next_suggestion, response_text, rating').eq('session_id', sessionId).order('submitted_at').limit(5000),
     ])
 
-    for (const result of [participantResult, messageResult, sharedContentResult, questionResult, answerResult, questionAnalysisResult, exitTicketResult]) {
+    for (const result of [participantResult, messageResult, sharedContentResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult]) {
       if (result.error) throw result.error
     }
 
@@ -137,6 +138,7 @@ Deno.serve(async (req) => {
     const sharedContents = sharedContentResult.data || []
     const questions = questionResult.data || []
     const answers = answerResult.data || []
+    const audioResponses = audioResponseResult.data || []
     const questionAnalyses = questionAnalysisResult.data || []
     const exitTickets = exitTicketResult.data || []
     const interactiveQuestions = questions.filter((question) => question.type !== 'send_screen')
@@ -158,6 +160,7 @@ Deno.serve(async (req) => {
         ]),
       )
       const assessed = questionAnswers.filter((answer) => answer.is_correct !== null)
+      const questionAudioResponses = audioResponses.filter((response) => response.question_id === question.id)
 
       return {
         question_id: question.id,
@@ -173,9 +176,19 @@ Deno.serve(async (req) => {
         correct_rate: assessed.length ? roundPercent((assessed.filter((answer) => answer.is_correct).length / assessed.length) * 100) : null,
         distribution,
         written_response_sample: questionAnswers.map((answer) => answer.answer_text).filter(Boolean).slice(0, 100),
+        audio_evaluations: questionAudioResponses.map((response, index) => ({
+          response_number: index + 1,
+          analysis_status: response.analysis_status,
+          detected_language: response.detected_language,
+          transcript: response.transcript,
+          score: response.score,
+          analysis: response.analysis_json,
+        })),
         prior_ai_analysis: analysisByQuestion.get(question.id) || null,
       }
     })
+
+    const analyzedAudioResponses = audioResponses.filter((response) => response.analysis_status === 'success' && typeof response.score === 'number')
 
     const metrics = {
       participant_count: participants.length,
@@ -189,11 +202,16 @@ Deno.serve(async (req) => {
       correct_answer_count: correctAnswers.length,
       correct_rate: assessedAnswers.length ? roundPercent((correctAnswers.length / assessedAnswers.length) * 100) : null,
       exit_ticket_count: exitTickets.length,
+      audio_response_count: audioResponses.length,
+      analyzed_audio_count: analyzedAudioResponses.length,
+      average_audio_score: analyzedAudioResponses.length
+        ? Math.round((analyzedAudioResponses.reduce((total, response) => total + response.score, 0) / analyzedAudioResponses.length) * 10) / 10
+        : null,
       duration_minutes: durationMinutes,
     }
 
     summaryInput = {
-      analysis_version: 2,
+      analysis_version: 3,
       session: {
         title: session.title,
         created_at: session.created_at,
@@ -214,7 +232,7 @@ Deno.serve(async (req) => {
     }
 
     const result = await callAiJson(
-      '你是 InterAct 的課堂互動與形成性評量分析顧問。請以繁體中文根據匿名化統計、講師派送的課程文字與連結、彈幕內容、每題作答結果、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告。instructor_shared_contents 是講師提供的課程參考資料，可用來理解課程脈絡，但不可當成學生意見或學習證據。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
+      '你是 InterAct 的課堂互動與形成性評量分析顧問。請以繁體中文根據匿名化統計、講師派送的課程文字與連結、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。instructor_shared_contents 是講師提供的課程參考資料，可用來理解課程脈絡，但不可當成學生意見或學習證據。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
       summaryInput,
       sessionAnalysisSchema,
     )
