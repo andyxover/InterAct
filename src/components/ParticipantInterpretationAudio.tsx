@@ -58,8 +58,9 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
       .on('broadcast', { event: 'audio' }, (message) => {
         const bytes = extractArrayBuffer(message)
         if (!bytes) return
-        void context.decodeAudioData(bytes.slice(0)).then((buffer) => {
-          if (context.state !== 'running') return
+        void context.decodeAudioData(bytes.slice(0)).then(async (buffer) => {
+          if (context.state !== 'running') await context.resume()
+          if (context.state !== 'running') throw new Error('AudioContext is suspended')
           const source = context.createBufferSource()
           source.buffer = buffer
           source.connect(context.destination)
@@ -69,7 +70,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           source.start(startsAt)
           nextPlaybackAtRef.current = startsAt + buffer.duration
           setStatus('口譯播放中')
-        }).catch(() => setStatus('收到音訊，但此瀏覽器無法播放。'))
+        }).catch(() => setStatus('收到音訊，但播放失敗；請按「停止聆聽」後重新開始。'))
       })
       .subscribe((nextStatus) => {
         if (nextStatus === 'SUBSCRIBED') setStatus('已連線，等待教師說話...')
