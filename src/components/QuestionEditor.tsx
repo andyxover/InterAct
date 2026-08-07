@@ -16,8 +16,8 @@ const questionTypes: Array<{ type: QuestionType; label: string }> = [
   { type: 'multiple_choice', label: '選擇題' },
   { type: 'true_false', label: '是非題' },
   { type: 'short_answer', label: '問答題' },
-  { type: 'pronunciation', label: '發音正確度' },
-  { type: 'oral_response', label: '口語回應' },
+  { type: 'oral_response', label: '口語表達' },
+  { type: 'pronunciation', label: '朗讀發音' },
 ]
 
 export function QuestionEditor({ error, open, previewUrl, onCancel, onCreate }: Props) {
@@ -58,7 +58,7 @@ export function QuestionEditor({ error, open, previewUrl, onCancel, onCreate }: 
         <div className="type-grid">
           {questionTypes.map((item) => (
             <button
-              className={type === item.type ? 'selected-type' : 'ghost-button'}
+              className={`${type === item.type ? 'selected-type' : 'ghost-button'}${item.type === 'send_screen' ? ' send-screen-type' : ''}`}
               key={item.type}
               type="button"
               onClick={() => setType(item.type)}

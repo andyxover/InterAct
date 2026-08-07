@@ -14,8 +14,8 @@ const questionTypeLabels: Record<Question['type'], string> = {
   multiple_choice: '選擇題',
   true_false: '是非題',
   short_answer: '問答題',
-  pronunciation: '發音正確度',
-  oral_response: '口語回應',
+  pronunciation: '朗讀發音',
+  oral_response: '口語表達',
 }
 
 async function fetchAllRows<T>(table: string, sessionId: string, orderColumn: string) {

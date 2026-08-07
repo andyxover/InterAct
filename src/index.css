@@ -1319,7 +1319,11 @@ h2 {
 .type-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.type-grid .send-screen-type {
+  grid-column: 1 / -1;
 }
 
 .selected-type {
@@ -2749,10 +2753,6 @@ h2 {
 
   .qr-floating {
     width: 180px;
-  }
-
-  .type-grid {
-    grid-template-columns: 1fr;
   }
 
   .session-report-page {
