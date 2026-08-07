@@ -217,7 +217,7 @@ export function DesktopOverlayPage() {
           fontBold={session.caption_font_bold}
           fontSize={session.caption_font_size}
           status={session.caption_status}
-          text={liveCaptions[session.caption_source_language] || ''}
+          text={liveCaptions[session.caption_display_language] || ''}
         />
       )}
       <LotteryOverlay event={lotteryEvent} onSelect={selectLotteryCandidate} />

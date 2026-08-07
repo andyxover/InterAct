@@ -4,7 +4,7 @@ contextBridge.exposeInMainWorld('interactDesktop', {
   isDesktop: true,
   platform: process.platform,
   enterPresenterMode: (sessionId) => ipcRenderer.invoke('window:presenter-mode', sessionId),
-  setPresenterExpanded: (expanded) => ipcRenderer.invoke('window:set-expanded', expanded),
+  setPresenterExpanded: (expanded, settingsOpen = false) => ipcRenderer.invoke('window:set-expanded', expanded, settingsOpen),
   setLotteryInteraction: (enabled) => ipcRenderer.invoke('lottery:set-interactive', enabled),
   showLottery: (event) => ipcRenderer.invoke('lottery:show', event),
   getLatestLottery: () => ipcRenderer.invoke('lottery:get-latest'),

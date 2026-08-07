@@ -20,7 +20,7 @@ Deno.serve(async (req) => {
     const tokenHash = await hashPresenterToken(presenterToken)
     const [{ data: keyRecord }, { data: session }] = await Promise.all([
       supabase.from('presenter_session_keys').select('session_id').eq('session_id', sessionId).eq('token_hash', tokenHash).maybeSingle(),
-      supabase.from('sessions').select('status, recording_enabled, caption_source_language, interpretation_enabled, interpretation_languages').eq('id', sessionId).maybeSingle(),
+      supabase.from('sessions').select('status, recording_enabled, caption_source_language, caption_display_language, interpretation_enabled, interpretation_languages').eq('id', sessionId).maybeSingle(),
     ])
     if (!keyRecord) return jsonResponse({ message: '講師權限驗證失敗。' }, 403)
     if (!session || session.status !== 'active') return jsonResponse({ message: '場次已結束，無法開啟字幕。' }, 409)
@@ -29,9 +29,11 @@ Deno.serve(async (req) => {
     const sourceLanguage = supportedLanguages.has(session.caption_source_language) ? session.caption_source_language : 'zh-tw'
     const transcriptionLanguage = sourceLanguage.startsWith('zh-') ? 'zh' : sourceLanguage
     if (mode === 'translation' && (
-      !session.interpretation_enabled ||
       !supportedLanguages.has(targetLanguage) ||
-      !session.interpretation_languages?.includes(targetLanguage)
+      (
+        session.caption_display_language !== targetLanguage
+        && (!session.interpretation_enabled || !session.interpretation_languages?.includes(targetLanguage))
+      )
     )) return jsonResponse({ message: '這個口譯語言未在場次中啟用。' }, 400)
 
     const apiKey = Deno.env.get('OPENAI_API_KEY')

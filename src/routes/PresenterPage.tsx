@@ -210,6 +210,7 @@ export function PresenterPage() {
     if (!window.interactDesktop || selectionMode) return
     window.interactDesktop.setPresenterExpanded(
       controlsOpen || editorOpen || textDispatchOpen || settingsOpen || endClassConfirmOpen || closeConfirmOpen,
+      settingsOpen,
     )
   }, [closeConfirmOpen, controlsOpen, editorOpen, endClassConfirmOpen, selectionMode, settingsOpen, textDispatchOpen])
 
@@ -387,7 +388,9 @@ export function PresenterPage() {
       }
       captionStreamRef.current = stream
       const normalizeCaptionText = await createCaptionTextNormalizer(
-        targetSession.caption_source_language === 'zh-tw' || targetSession.interpretation_languages.includes('zh-tw'),
+        targetSession.caption_source_language === 'zh-tw'
+          || targetSession.caption_display_language === 'zh-tw'
+          || targetSession.interpretation_languages.includes('zh-tw'),
       )
 
       const persistCaption = async (language: string, text: string) => {
@@ -438,9 +441,12 @@ export function PresenterPage() {
         })
       }
 
-      const targets = targetSession.interpretation_enabled
-        ? [...new Set(targetSession.interpretation_languages)].filter((language) => language !== targetSession.caption_source_language)
-        : []
+      const targets = [...new Set([
+        ...(targetSession.caption_display_language !== targetSession.caption_source_language
+          ? [targetSession.caption_display_language]
+          : []),
+        ...(targetSession.interpretation_enabled ? targetSession.interpretation_languages : []),
+      ])].filter((language) => language !== targetSession.caption_source_language)
       const transcriptionConnection = await createRealtimeCaptionConnection({
           sessionId,
           presenterToken,
@@ -464,7 +470,7 @@ export function PresenterPage() {
             language,
             sourceLanguage: targetSession.caption_source_language,
             stream,
-            onTranslatedAudio: targetSession.interpretation_audio_enabled
+            onTranslatedAudio: targetSession.interpretation_audio_enabled && targetSession.interpretation_languages.includes(language)
               ? (translatedStream) => {
                   void createInterpretationAudioBroadcaster(sessionId, language, translatedStream, (message) => {
                     setCaptionError(`${language.toUpperCase()} 語音口譯：${message}`)
@@ -562,6 +568,7 @@ export function PresenterPage() {
           sessionId,
           presenterToken,
           captionSourceLanguage: settings.sourceLanguage,
+          captionDisplayLanguage: settings.displayLanguage,
           captionFontSize: settings.fontSize,
           captionFontBold: settings.fontBold,
           interpretationAudioEnabled: settings.interpretationAudioEnabled,
@@ -1169,7 +1176,7 @@ export function PresenterPage() {
   }
 
   return (
-    <main className={`presenter-page${controlsOpen ? ' controls-open' : ''}${selectionMode ? ' selecting-capture' : ''}`}>
+    <main className={`presenter-page${controlsOpen ? ' controls-open' : ''}${settingsOpen ? ' settings-open' : ''}${selectionMode ? ' selecting-capture' : ''}`}>
       {!selectionMode && (
         <aside className="qr-floating">
           <QRCodePanel
@@ -1249,7 +1256,7 @@ export function PresenterPage() {
           fontBold={session.caption_font_bold}
           fontSize={session.caption_font_size}
           status={session.caption_status}
-          text={liveCaptions[session.caption_source_language] || ''}
+          text={liveCaptions[session.caption_display_language] || ''}
         />
       )}
       {selectionMode && (

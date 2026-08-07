@@ -9,25 +9,62 @@ type Props = {
   sessionId: string
 }
 
-function extractArrayBuffer(value: unknown): ArrayBuffer | null {
-  if (value instanceof ArrayBuffer) return value
-  if (ArrayBuffer.isView(value)) return value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer
+type AudioPacket = {
+  bytes: ArrayBuffer
+  encoding: string
+  sampleRate: number
+}
+
+function base64ToArrayBuffer(encoded: string) {
+  const binary = window.atob(encoded)
+  const bytes = new Uint8Array(binary.length)
+  for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
+  return bytes.buffer
+}
+
+function extractAudioPacket(value: unknown): AudioPacket | null {
+  if (value instanceof ArrayBuffer) return { bytes: value, encoding: 'encoded', sampleRate: 24_000 }
+  if (ArrayBuffer.isView(value)) {
+    return {
+      bytes: value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer,
+      encoding: 'encoded',
+      sampleRate: 24_000,
+    }
+  }
   if (value && typeof value === 'object' && 'payload' in value) {
-    return extractArrayBuffer((value as { payload: unknown }).payload)
+    return extractAudioPacket((value as { payload: unknown }).payload)
   }
   if (value && typeof value === 'object' && 'audioBase64' in value) {
-    const encoded = (value as { audioBase64?: unknown }).audioBase64
+    const packet = value as { audioBase64?: unknown; encoding?: unknown; sampleRate?: unknown }
+    const encoded = packet.audioBase64
     if (typeof encoded !== 'string' || !encoded) return null
     try {
-      const binary = window.atob(encoded)
-      const bytes = new Uint8Array(binary.length)
-      for (let index = 0; index < binary.length; index += 1) bytes[index] = binary.charCodeAt(index)
-      return bytes.buffer
+      return {
+        bytes: base64ToArrayBuffer(encoded),
+        encoding: typeof packet.encoding === 'string' ? packet.encoding : 'encoded',
+        sampleRate: typeof packet.sampleRate === 'number' && packet.sampleRate >= 8_000 && packet.sampleRate <= 96_000
+          ? packet.sampleRate
+          : 24_000,
+      }
     } catch {
       return null
     }
   }
   return null
+}
+
+function pcm16AudioBuffer(context: AudioContext, packet: AudioPacket) {
+  const view = new DataView(packet.bytes)
+  const sampleCount = Math.floor(packet.bytes.byteLength / 2)
+  const buffer = context.createBuffer(1, sampleCount, packet.sampleRate)
+  const samples = buffer.getChannelData(0)
+  let squareSum = 0
+  for (let index = 0; index < sampleCount; index += 1) {
+    const sample = view.getInt16(index * 2, true) / 0x8000
+    samples[index] = sample
+    squareSum += sample * sample
+  }
+  return { buffer, rms: sampleCount ? Math.sqrt(squareSum / sampleCount) : 0 }
 }
 
 export function ParticipantInterpretationAudio({ enabled, languages, sessionId }: Props) {
@@ -56,11 +93,18 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     const channel = supabase
       .channel(`interpretation-audio:${sessionId}:${language}`)
       .on('broadcast', { event: 'audio' }, (message) => {
-        const bytes = extractArrayBuffer(message)
-        if (!bytes) return
-        void context.decodeAudioData(bytes.slice(0)).then(async (buffer) => {
+        const packet = extractAudioPacket(message)
+        if (!packet) return
+        const decoded = packet.encoding === 'pcm16le'
+          ? Promise.resolve(pcm16AudioBuffer(context, packet))
+          : context.decodeAudioData(packet.bytes.slice(0)).then((buffer) => ({ buffer, rms: 1 }))
+        void decoded.then(async ({ buffer, rms }) => {
           if (context.state !== 'running') await context.resume()
           if (context.state !== 'running') throw new Error('AudioContext is suspended')
+          if (rms < 0.0005) {
+            setStatus('已連線，等待教師說話...')
+            return
+          }
           const source = context.createBufferSource()
           source.buffer = buffer
           source.connect(context.destination)
@@ -70,7 +114,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           source.start(startsAt)
           nextPlaybackAtRef.current = startsAt + buffer.duration
           setStatus('口譯播放中')
-        }).catch(() => setStatus('收到音訊，但播放失敗；請按「停止聆聽」後重新開始。'))
+        }).catch(() => setStatus('音訊輸出未啟用；請按「測試耳機」後重新開始聆聽。'))
       })
       .subscribe((nextStatus) => {
         if (nextStatus === 'SUBSCRIBED') setStatus('已連線，等待教師說話...')
@@ -97,6 +141,23 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     audioContextRef.current = context
     await context.resume()
     setListening(true)
+  }
+
+  async function testHeadphones() {
+    const context = audioContextRef.current || new AudioContext()
+    audioContextRef.current = context
+    await context.resume()
+    const oscillator = context.createOscillator()
+    const gain = context.createGain()
+    oscillator.frequency.value = 660
+    gain.gain.setValueAtTime(0.0001, context.currentTime)
+    gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02)
+    gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.28)
+    oscillator.connect(gain)
+    gain.connect(context.destination)
+    oscillator.start()
+    oscillator.stop(context.currentTime + 0.3)
+    setStatus('已播放測試音；若沒有聽見，請檢查裝置音量與耳機輸出。')
   }
 
   if (!enabled || !languages.length) return null
@@ -138,6 +199,9 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
       </label>
       <button className={listening ? 'ghost-button' : ''} type="button" onClick={() => void toggleListening()}>
         {listening ? <><Pause size={17} />停止聆聽</> : <><Play size={17} />開始聆聽口譯</>}
+      </button>
+      <button className="ghost-button" type="button" onClick={() => void testHeadphones()}>
+        <Volume2 size={17} />測試耳機
       </button>
       <p className="muted">{status || '建議戴上耳機，選擇語言後開始聆聽。'}</p>
     </section>

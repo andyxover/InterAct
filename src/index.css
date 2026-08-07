@@ -492,6 +492,32 @@ h2 {
   width: 100%;
 }
 
+.desktop-shell .presenter-page.settings-open {
+  grid-template-columns: minmax(0, 680px) 420px;
+}
+
+.desktop-shell .presenter-page.settings-open .qr-floating,
+.desktop-shell .presenter-page.settings-open .presenter-controls-overlay {
+  grid-column: 2;
+}
+
+.desktop-shell .presenter-page.settings-open .presenter-settings-backdrop {
+  align-items: flex-start;
+  background: transparent;
+  bottom: 0;
+  justify-content: flex-start;
+  left: 0;
+  padding: 5px 10px 5px 5px;
+  right: 440px;
+  top: 0;
+}
+
+.desktop-shell .presenter-page.settings-open .presenter-settings-modal {
+  max-height: calc(100vh - 10px);
+  max-width: none;
+  overflow-y: auto;
+}
+
 .desktop-shell .presenter-page.controls-open .qr-panel {
   justify-items: center;
   width: 100%;

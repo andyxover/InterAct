@@ -1,11 +1,12 @@
 import { Languages, Mic, RefreshCw, Settings, X } from 'lucide-react'
 import { useEffect, useMemo, useState } from 'react'
 import type { FormEvent } from 'react'
-import { INTERPRETATION_LANGUAGES, SPEAKER_LANGUAGES, defaultInterpretationLanguages } from '../lib/captionLanguages'
+import { CAPTION_DISPLAY_LANGUAGES, INTERPRETATION_LANGUAGES, SPEAKER_LANGUAGES, defaultInterpretationLanguages } from '../lib/captionLanguages'
 import type { Session } from '../types'
 
 export type PresenterCaptionSettings = {
   sourceLanguage: string
+  displayLanguage: string
   fontSize: number
   fontBold: boolean
   interpretationAudioEnabled: boolean
@@ -36,8 +37,9 @@ export function PresenterSettingsModal({
   onSave,
 }: Props) {
   const [sourceLanguage, setSourceLanguage] = useState(session.caption_source_language)
-  const [fontSize, setFontSize] = useState(session.caption_font_size ?? 48)
-  const [fontBold, setFontBold] = useState(session.caption_font_bold ?? true)
+  const [displayLanguage, setDisplayLanguage] = useState(session.caption_display_language)
+  const [fontSize, setFontSize] = useState(session.caption_font_size ?? 42)
+  const [fontBold, setFontBold] = useState(session.caption_font_bold ?? false)
   const [interpretationAudioEnabled, setInterpretationAudioEnabled] = useState(session.interpretation_audio_enabled)
   const [interpretationLanguages, setInterpretationLanguages] = useState(session.interpretation_languages)
   const [microphoneId, setMicrophoneId] = useState(selectedMicrophoneId)
@@ -47,8 +49,9 @@ export function PresenterSettingsModal({
   useEffect(() => {
     if (!open) return
     setSourceLanguage(session.caption_source_language)
-    setFontSize(session.caption_font_size ?? 48)
-    setFontBold(session.caption_font_bold ?? true)
+    setDisplayLanguage(session.caption_display_language)
+    setFontSize(session.caption_font_size ?? 42)
+    setFontBold(session.caption_font_bold ?? false)
     setInterpretationAudioEnabled(session.interpretation_audio_enabled)
     setInterpretationLanguages(session.interpretation_languages)
     setMicrophoneId(selectedMicrophoneId)
@@ -114,7 +117,7 @@ export function PresenterSettingsModal({
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    onSave({ sourceLanguage, fontSize, fontBold, interpretationAudioEnabled, interpretationLanguages }, microphoneId)
+    onSave({ sourceLanguage, displayLanguage, fontSize, fontBold, interpretationAudioEnabled, interpretationLanguages }, microphoneId)
   }
 
   return (
@@ -165,6 +168,7 @@ export function PresenterSettingsModal({
               講師語言
               <select value={sourceLanguage} onChange={(event) => {
                 const next = event.target.value
+                if (displayLanguage === sourceLanguage) setDisplayLanguage(next)
                 setSourceLanguage(next)
                 setInterpretationLanguages(defaultInterpretationLanguages(next))
               }}>
@@ -172,9 +176,15 @@ export function PresenterSettingsModal({
               </select>
             </label>
             <label>
+              字幕語言
+              <select value={displayLanguage} onChange={(event) => setDisplayLanguage(event.target.value)}>
+                {CAPTION_DISPLAY_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+              </select>
+            </label>
+            <label>
               字幕大小
               <select value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))}>
-                {[32, 40, 48, 56, 64, 72, 80].map((size) => <option key={size} value={size}>{size} px</option>)}
+                {[32, 36, 42, 48, 56, 64, 72, 80].map((size) => <option key={size} value={size}>{size} px</option>)}
               </select>
             </label>
           </div>
@@ -213,7 +223,7 @@ export function PresenterSettingsModal({
               })}
             </div>
           )}
-          <p className="muted caption-cost-note">中文授課預設英文口譯，英文授課預設繁體中文；可加選日語、韓語、越南語、印尼語、泰語、西班牙語及德語，最多三種。每種語言建立一條付費即時翻譯連線，學生人數不增加連線數。</p>
+          <p className="muted caption-cost-note">字幕語言與講師語言不同時會建立一條即時翻譯連線。中文授課預設英文口譯，英文授課預設繁體中文；口譯語音最多三種，每種語言建立一條付費即時翻譯連線，學生人數不增加連線數。</p>
         </section>
 
         {error && <p className="error">{error}</p>}
