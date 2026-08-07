@@ -102,6 +102,17 @@ export function PresenterPage() {
   const captionRunIdRef = useRef(0)
   const captionStreamRef = useRef<MediaStream | null>(null)
   const captionChannelRef = useRef<RealtimeChannel | null>(null)
+  const interpretationAudioContextRef = useRef<AudioContext | null>(null)
+
+  function prepareInterpretationAudioContext() {
+    const current = interpretationAudioContextRef.current
+    const audioContext = current && current.state !== 'closed'
+      ? current
+      : new AudioContext({ sampleRate: 24_000 })
+    interpretationAudioContextRef.current = audioContext
+    if (audioContext.state !== 'running') void audioContext.resume()
+    return audioContext
+  }
   const fallbackJoinUrl = useMemo(() => buildJoinUrl(session?.code || sessionId), [session?.code, sessionId])
   const [joinUrl, setJoinUrl] = useState(fallbackJoinUrl)
   const onlineParticipantIds = useSessionPresence(sessionId)
@@ -401,6 +412,9 @@ export function PresenterPage() {
       setAnalysisError('找不到講者權限，請重新加入場次。')
       return
     }
+    const interpretationAudioContext = targetSession.interpretation_audio_enabled
+      ? prepareInterpretationAudioContext()
+      : null
 
     setBusy(true)
     setAnalysisError('')
@@ -511,11 +525,12 @@ export function PresenterPage() {
             stream,
             onTranslatedAudio: targetSession.interpretation_audio_enabled && targetSession.interpretation_languages.includes(language)
               ? (translatedStream) => {
-                  void createInterpretationAudioBroadcaster(sessionId, language, translatedStream, (message) => {
-                    setCaptionError(`${language.toUpperCase()} 語音口譯：${message}`)
+                  const audioContext = interpretationAudioContext || prepareInterpretationAudioContext()
+                  void createInterpretationAudioBroadcaster(sessionId, language, translatedStream, audioContext, (message) => {
+                    setCaptionError(`${language.toUpperCase()} 即時口譯語音：${message}`)
                   })
                     .then((broadcaster) => interpretationBroadcastersRef.current.push(broadcaster))
-                    .catch((error: unknown) => setCaptionError(error instanceof Error ? error.message : '即時語音口譯廣播失敗。'))
+                    .catch((error: unknown) => setCaptionError(error instanceof Error ? error.message : '即時口譯語音啟動失敗。'))
                 }
               : undefined,
             onCaption,
@@ -594,6 +609,7 @@ export function PresenterPage() {
       setSettingsError('找不到講師權限，請重新加入場次。')
       return
     }
+    if (settings.interpretationAudioEnabled) prepareInterpretationAudioContext()
 
     setSettingsBusy(true)
     setSettingsError('')
@@ -643,6 +659,7 @@ export function PresenterPage() {
     for (const broadcaster of interpretationBroadcastersRef.current) broadcaster.close()
     for (const connection of captionConnectionsRef.current) connection.close()
     for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
+    void interpretationAudioContextRef.current?.close()
   }, [clearCaptionDisplayTimers])
 
   async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {

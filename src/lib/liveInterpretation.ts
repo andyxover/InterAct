@@ -2,14 +2,13 @@ import type { RealtimeChannel } from '@supabase/supabase-js'
 import { requireSupabase } from './supabase'
 
 const CHUNK_DURATION_MS = 250
-const AUDIO_SAMPLE_RATE = 24_000
 const AUDIO_PACKET_HEADER_BYTES = 8
 
 export type InterpretationAudioBroadcaster = {
   close: () => void
 }
 
-function encodePcm16(samples: Float32Array) {
+function encodePcm16(samples: Float32Array, sampleRate: number) {
   const buffer = new ArrayBuffer(AUDIO_PACKET_HEADER_BYTES + samples.length * 2)
   const view = new DataView(buffer)
   // IAP1 (InterAct Audio Packet v1), followed by the little-endian sample rate.
@@ -17,7 +16,7 @@ function encodePcm16(samples: Float32Array) {
   view.setUint8(1, 0x41)
   view.setUint8(2, 0x50)
   view.setUint8(3, 0x31)
-  view.setUint32(4, AUDIO_SAMPLE_RATE, true)
+  view.setUint32(4, sampleRate, true)
   for (let index = 0; index < samples.length; index += 1) {
     const sample = Math.max(-1, Math.min(1, samples[index]))
     view.setInt16(AUDIO_PACKET_HEADER_BYTES + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
@@ -44,21 +43,31 @@ export async function createInterpretationAudioBroadcaster(
   sessionId: string,
   language: string,
   stream: MediaStream,
+  audioContext: AudioContext,
   onError: (message: string) => void,
 ): Promise<InterpretationAudioBroadcaster> {
   const supabase = requireSupabase()
   const channel = supabase.channel(`interpretation-audio:${sessionId}:${language}`, {
     config: { broadcast: { ack: true } },
   })
-  await waitForSubscription(channel)
+  try {
+    await waitForSubscription(channel)
+  } catch (error) {
+    void supabase.removeChannel(channel)
+    throw error
+  }
 
   let closed = false
-  const audioContext = new AudioContext({ sampleRate: AUDIO_SAMPLE_RATE })
-  await audioContext.resume()
+  if (audioContext.state !== 'running') await audioContext.resume()
+  if (audioContext.state !== 'running') {
+    void supabase.removeChannel(channel)
+    throw new Error('教師端的音訊處理尚未啟動，請關閉後重新開啟課程錄製。')
+  }
   const source = audioContext.createMediaStreamSource(stream)
   const processor = audioContext.createScriptProcessor(4096, 1, 1)
   const silentOutput = audioContext.createGain()
-  silentOutput.gain.value = 0
+  // Keep Chromium's audio graph active without making the interpreted track audible locally.
+  silentOutput.gain.value = 0.000001
   source.connect(processor)
   processor.connect(silentOutput)
   silentOutput.connect(audioContext.destination)
@@ -69,7 +78,11 @@ export async function createInterpretationAudioBroadcaster(
 
   const sendChunk = (samples: Float32Array) => {
     sendQueue = sendQueue.then(async () => {
-      const result = await channel.send({ type: 'broadcast', event: 'audio', payload: encodePcm16(samples) })
+      const result = await channel.send({
+        type: 'broadcast',
+        event: 'audio',
+        payload: encodePcm16(samples, audioContext.sampleRate),
+      })
       if (result !== 'ok') throw new Error('即時口譯音訊送出失敗。')
     }).catch((error: unknown) => onError(error instanceof Error ? error.message : '即時口譯音訊送出失敗。'))
   }
@@ -96,7 +109,6 @@ export async function createInterpretationAudioBroadcaster(
       source.disconnect()
       processor.disconnect()
       silentOutput.disconnect()
-      void audioContext.close()
       void supabase.removeChannel(channel)
     },
   }

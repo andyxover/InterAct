@@ -138,7 +138,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           source.start(startsAt)
           nextPlaybackAtRef.current = startsAt + buffer.duration
           setStatus('口譯播放中')
-        }).catch(() => setStatus('音訊輸出未啟用；請按「測試耳機」後重新開始聆聽。'))
+        }).catch(() => setStatus('音訊輸出未啟用；請點右上角喇叭後重新開始聆聽。'))
       })
       .subscribe((nextStatus) => {
         if (nextStatus === 'SUBSCRIBED') setStatus('已連線，等待教師說話...')
@@ -201,7 +201,15 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     <section className="panel participant-interpretation-audio">
       <div className="participant-interpretation-heading">
         <span><Headphones size={19} />即時語音口譯</span>
-        {listening && <Volume2 className="interpretation-playing-icon" size={18} />}
+        <button
+          aria-label="測試耳機"
+          className={`interpretation-speaker-test${listening ? ' is-listening' : ''}`}
+          title="測試耳機"
+          type="button"
+          onClick={() => void testHeadphones()}
+        >
+          <Volume2 className="interpretation-playing-icon" size={18} />
+        </button>
       </div>
       <label>
         耳機語言
@@ -234,9 +242,6 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
       </label>
       <button className={listening ? 'ghost-button' : ''} type="button" onClick={() => void toggleListening()}>
         {listening ? <><Pause size={17} />停止聆聽</> : <><Play size={17} />開始聆聽口譯</>}
-      </button>
-      <button className="ghost-button" type="button" onClick={() => void testHeadphones()}>
-        <Volume2 size={17} />測試耳機
       </button>
       <p className="muted">{status || '建議戴上耳機，選擇語言後開始聆聽。'}</p>
     </section>
