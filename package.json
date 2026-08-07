@@ -44,7 +44,7 @@
   "build": {
     "appId": "tw.interact.presenter.desktop",
     "productName": "InterAct",
-    "artifactName": "interact.${ext}",
+    "artifactName": "InterAct.${ext}",
     "directories": {
       "output": "release"
     },
@@ -61,7 +61,7 @@
     ],
     "win": {
       "icon": "build/icon.ico",
-      "executableName": "interact",
+      "executableName": "InterAct",
       "target": [
         {
           "target": "portable",
