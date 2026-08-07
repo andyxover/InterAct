@@ -1,4 +1,4 @@
-import { createClient } from 'npm:@supabase/supabase-js@2.110.1'
+import { createClient } from 'npm:@supabase/supabase-js@2.110.8'
 
 export function getAdminClient() {
   const projectUrl = Deno.env.get('SUPABASE_URL')
@@ -19,3 +19,5 @@ export async function hashPresenterToken(token: string) {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(token))
   return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, '0')).join('')
 }
+
+export const hashParticipantToken = hashPresenterToken

@@ -44,7 +44,7 @@ export type Screenshot = {
   created_at: string
 }
 
-export type QuestionType = 'send_screen' | 'poll' | 'multiple_choice' | 'true_false' | 'short_answer'
+export type QuestionType = 'send_screen' | 'poll' | 'multiple_choice' | 'true_false' | 'short_answer' | 'pronunciation' | 'oral_response'
 export type ExitTicketCategory = 'lesson_summary' | 'learning_assessment' | 'course_satisfaction' | 'student_question'
 export type ExitTicketResponseType = 'text' | 'rating'
 
@@ -128,6 +128,39 @@ export type Answer = {
   answer_text: string | null
   is_correct: boolean | null
   submitted_at: string
+}
+
+export type AudioAnalysis = {
+  mode: 'pronunciation' | 'oral_response'
+  detected_language: string
+  transcript: string
+  score: number
+  summary: string
+  relevance: string
+  clarity: string
+  completeness: string
+  strengths: string[]
+  improvements: string[]
+  limitations: string[]
+}
+
+export type AudioResponse = {
+  id: string
+  session_id: string
+  question_id: string
+  participant_id: string
+  participant_name: string
+  mime_type: string
+  duration_ms: number
+  analysis_status: 'pending' | 'success' | 'failed'
+  detected_language: string | null
+  transcript: string | null
+  score: number | null
+  analysis_json: AudioAnalysis | null
+  error_message: string | null
+  submitted_at: string
+  analyzed_at: string | null
+  signed_url?: string | null
 }
 
 export type QuestionAnalysis = {

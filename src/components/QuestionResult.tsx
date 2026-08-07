@@ -1,11 +1,12 @@
-import { CheckCircle2, Dice5, Sparkles } from 'lucide-react'
+import { AudioLines, CheckCircle2, Dice5, Sparkles } from 'lucide-react'
 import { correctnessStats, countByAnswer } from '../lib/stats'
-import type { Answer, Question, QuestionAnalysis } from '../types'
+import type { Answer, AudioResponse, Question, QuestionAnalysis } from '../types'
 
 type Props = {
   anonymousEnabled: boolean
   question: Question | null
   answers: Answer[]
+  audioResponses: AudioResponse[]
   analysis: QuestionAnalysis | null
   analysisBusy: boolean
   analysisError: string
@@ -59,7 +60,7 @@ function QuestionStatusActions({
 }
 
 function AiAnalysisPanel({ question, answers, analysis, analysisBusy, analysisError, onAnalyze, onSetCorrectAnswer }: AnalysisProps) {
-  if (!question || question.type === 'send_screen') return null
+  if (!question || ['send_screen', 'pronunciation', 'oral_response'].includes(question.type)) return null
 
   const canAnalyze = question.status !== 'active' && answers.length > 0
   const suggestion = analysis?.question_understanding.suggested_correct_answer
@@ -142,7 +143,7 @@ function AiAnalysisPanel({ question, answers, analysis, analysisBusy, analysisEr
 }
 
 export function QuestionResult(props: Props) {
-  const { anonymousEnabled, question, answers, analysis, onSetCorrectAnswer } = props
+  const { anonymousEnabled, question, answers, audioResponses, analysis, onSetCorrectAnswer } = props
 
   if (!question) {
     return (
@@ -185,6 +186,51 @@ export function QuestionResult(props: Props) {
         </section>
         <AiAnalysisPanel {...props} />
       </>
+    )
+  }
+
+  if (question.type === 'pronunciation' || question.type === 'oral_response') {
+    return (
+      <section className="panel result-panel audio-results-panel">
+        <div className="panel-heading">
+          <h2><AudioLines size={20} />{question.title}</h2>
+          <QuestionStatusActions {...props} question={question} />
+        </div>
+        {question.prompt_text && <p className="detected-question">{question.prompt_text}</p>}
+        <p className="muted">已錄音 {answers.length} 人</p>
+        {question.status === 'active' ? (
+          <p className="muted">停止作答後會顯示個別 AI 評測與錄音播放器。</p>
+        ) : audioResponses.length ? (
+          <div className="audio-result-list">
+            {audioResponses.map((response, index) => {
+              const result = response.analysis_json
+              return (
+                <article className="audio-result-item" key={response.id}>
+                  <div className="audio-result-heading">
+                    <strong>{anonymousEnabled ? `匿名回答 ${index + 1}` : response.participant_name}</strong>
+                    {typeof response.score === 'number' && <span className="audio-result-score">{response.score} 分</span>}
+                  </div>
+                  {response.signed_url && <audio controls preload="metadata" src={response.signed_url} />}
+                  {response.analysis_status === 'success' && result ? (
+                    <>
+                      <p>{result.summary}</p>
+                      <p><strong>辨識內容：</strong>{result.transcript || '未辨識到語音內容'}</p>
+                      <details><summary>做得好的地方</summary><ul>{result.strengths.map((item) => <li key={item}>{item}</li>)}</ul></details>
+                      <details><summary>改善建議</summary><ul>{result.improvements.map((item) => <li key={item}>{item}</li>)}</ul></details>
+                    </>
+                  ) : response.analysis_status === 'failed' ? (
+                    <p className="error">AI 評測失敗，錄音仍可播放。</p>
+                  ) : (
+                    <p className="muted">AI 評測仍在處理中。</p>
+                  )}
+                </article>
+              )
+            })}
+          </div>
+        ) : (
+          <p className="muted">目前沒有錄音作答。</p>
+        )}
+      </section>
     )
   }
 

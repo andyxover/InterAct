@@ -1319,7 +1319,7 @@ h2 {
 .type-grid {
   display: grid;
   gap: 8px;
-  grid-template-columns: repeat(5, minmax(0, 1fr));
+  grid-template-columns: repeat(auto-fit, minmax(112px, 1fr));
 }
 
 .selected-type {
@@ -1712,6 +1712,73 @@ h2 {
 .participant-question form > button,
 .exit-ticket-form > button {
   min-height: 50px;
+}
+
+.audio-recorder,
+.audio-response-card,
+.audio-result-list,
+.audio-result-item {
+  display: grid;
+  gap: 12px;
+}
+
+.recording-button {
+  min-height: 72px;
+  width: 100%;
+}
+
+.recording-button.active {
+  background: var(--danger);
+  border-color: var(--danger);
+  color: #fff;
+}
+
+.audio-response-card,
+.audio-result-item {
+  background: var(--surface-strong);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  padding: 14px;
+}
+
+.audio-response-card audio,
+.audio-result-item audio {
+  width: 100%;
+}
+
+.audio-score {
+  align-items: baseline;
+  color: var(--primary-dark);
+  display: flex;
+  gap: 4px;
+}
+
+.audio-score strong {
+  font-size: 42px;
+  line-height: 1;
+}
+
+.audio-result-heading {
+  align-items: center;
+  display: flex;
+  gap: 12px;
+  justify-content: space-between;
+}
+
+.audio-result-score {
+  background: var(--primary-soft);
+  border-radius: 6px;
+  color: var(--primary-dark);
+  font-weight: 800;
+  padding: 4px 8px;
+}
+
+.spin {
+  animation: spin 1s linear infinite;
+}
+
+@keyframes spin {
+  to { transform: rotate(360deg); }
 }
 
 .detected-question {

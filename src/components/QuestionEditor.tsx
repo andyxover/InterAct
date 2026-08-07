@@ -16,6 +16,8 @@ const questionTypes: Array<{ type: QuestionType; label: string }> = [
   { type: 'multiple_choice', label: '選擇題' },
   { type: 'true_false', label: '是非題' },
   { type: 'short_answer', label: '問答題' },
+  { type: 'pronunciation', label: '發音正確度' },
+  { type: 'oral_response', label: '口語回應' },
 ]
 
 export function QuestionEditor({ error, open, previewUrl, onCancel, onCreate }: Props) {
@@ -35,7 +37,7 @@ export function QuestionEditor({ error, open, previewUrl, onCancel, onCreate }: 
   const editableOptions = type === 'multiple_choice' || type === 'poll'
   const finalOptions = useMemo(() => {
     if (type === 'true_false') return ['是', '否']
-    if (type === 'short_answer' || type === 'send_screen') return []
+    if (['short_answer', 'send_screen', 'pronunciation', 'oral_response'].includes(type)) return []
     return options.map((option) => option.trim()).filter(Boolean)
   }, [options, type])
 
@@ -106,10 +108,10 @@ export function QuestionEditor({ error, open, previewUrl, onCancel, onCreate }: 
         )}
         {type !== 'send_screen' && (
           <label className="question-prompt-field">
-            題目（選填）
+            {type === 'pronunciation' ? '指定朗讀內容（選填）' : '題目（選填）'}
             <input
               value={promptText}
-              placeholder="未輸入則以AI判讀題目"
+              placeholder={type === 'pronunciation' ? '未輸入則以 AI 判讀截圖中的朗讀內容' : '未輸入則以AI判讀題目'}
               onChange={(event) => setPromptText(event.target.value)}
             />
           </label>
