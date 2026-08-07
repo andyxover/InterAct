@@ -1,4 +1,4 @@
-import { AudioLines, BellRing, Captions, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Settings, Sparkles, Square, Users } from 'lucide-react'
+import { AudioLines, BellRing, Captions, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Settings, Shapes, Sparkles, Square, Users } from 'lucide-react'
 import type { Session } from '../types'
 
 type Props = {
@@ -111,7 +111,7 @@ export function PresenterControlPanel({
       </div>
 
       <div className="control-section">
-        <p className="control-section-label"><MonitorUp size={15} />分享內容</p>
+        <p className="control-section-label"><Shapes size={15} />課堂活動</p>
         <div className="control-action-grid">
           {onCaptureScreen && (
             <button className="control-action share-action" type="button" onClick={onCaptureScreen} disabled={busy}>

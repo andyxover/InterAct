@@ -15,6 +15,27 @@ type AudioPacket = {
   sampleRate: number
 }
 
+const AUDIO_PACKET_HEADER_BYTES = 8
+
+function binaryAudioPacket(bytes: ArrayBuffer): AudioPacket {
+  if (bytes.byteLength >= AUDIO_PACKET_HEADER_BYTES) {
+    const header = new DataView(bytes)
+    const isInterActPcm = header.getUint8(0) === 0x49
+      && header.getUint8(1) === 0x41
+      && header.getUint8(2) === 0x50
+      && header.getUint8(3) === 0x31
+    if (isInterActPcm) {
+      const sampleRate = header.getUint32(4, true)
+      return {
+        bytes: bytes.slice(AUDIO_PACKET_HEADER_BYTES),
+        encoding: 'pcm16le',
+        sampleRate: sampleRate >= 8_000 && sampleRate <= 96_000 ? sampleRate : 24_000,
+      }
+    }
+  }
+  return { bytes, encoding: 'encoded', sampleRate: 24_000 }
+}
+
 function base64ToArrayBuffer(encoded: string) {
   const binary = window.atob(encoded)
   const bytes = new Uint8Array(binary.length)
@@ -23,13 +44,9 @@ function base64ToArrayBuffer(encoded: string) {
 }
 
 function extractAudioPacket(value: unknown): AudioPacket | null {
-  if (value instanceof ArrayBuffer) return { bytes: value, encoding: 'encoded', sampleRate: 24_000 }
+  if (value instanceof ArrayBuffer) return binaryAudioPacket(value)
   if (ArrayBuffer.isView(value)) {
-    return {
-      bytes: value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer,
-      encoding: 'encoded',
-      sampleRate: 24_000,
-    }
+    return binaryAudioPacket(value.buffer.slice(value.byteOffset, value.byteOffset + value.byteLength) as ArrayBuffer)
   }
   if (value && typeof value === 'object' && 'payload' in value) {
     return extractAudioPacket((value as { payload: unknown }).payload)
@@ -72,6 +89,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
   const [listening, setListening] = useState(false)
   const [status, setStatus] = useState('')
   const audioContextRef = useRef<AudioContext | null>(null)
+  const outputGainRef = useRef<GainNode | null>(null)
   const nextPlaybackAtRef = useRef(0)
 
   useEffect(() => {
@@ -87,6 +105,12 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     const supabase = requireSupabase()
     const context = audioContextRef.current || new AudioContext()
     audioContextRef.current = context
+    const outputGain = outputGainRef.current || context.createGain()
+    if (!outputGainRef.current) {
+      outputGain.gain.value = 1.35
+      outputGain.connect(context.destination)
+      outputGainRef.current = outputGain
+    }
     nextPlaybackAtRef.current = context.currentTime
     setStatus('正在連接教師端口譯...')
 
@@ -107,7 +131,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           }
           const source = context.createBufferSource()
           source.buffer = buffer
-          source.connect(context.destination)
+          source.connect(outputGain)
           const lag = nextPlaybackAtRef.current - context.currentTime
           if (lag > 5 || lag < -0.5) nextPlaybackAtRef.current = context.currentTime + 0.08
           const startsAt = Math.max(context.currentTime + 0.04, nextPlaybackAtRef.current)
@@ -139,6 +163,11 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     }
     const context = audioContextRef.current || new AudioContext()
     audioContextRef.current = context
+    if (!outputGainRef.current) {
+      outputGainRef.current = context.createGain()
+      outputGainRef.current.gain.value = 1.35
+      outputGainRef.current.connect(context.destination)
+    }
     await context.resume()
     setListening(true)
   }
@@ -146,6 +175,12 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
   async function testHeadphones() {
     const context = audioContextRef.current || new AudioContext()
     audioContextRef.current = context
+    const outputGain = outputGainRef.current || context.createGain()
+    if (!outputGainRef.current) {
+      outputGain.gain.value = 1.35
+      outputGain.connect(context.destination)
+      outputGainRef.current = outputGain
+    }
     await context.resume()
     const oscillator = context.createOscillator()
     const gain = context.createGain()
@@ -154,7 +189,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     gain.gain.exponentialRampToValueAtTime(0.12, context.currentTime + 0.02)
     gain.gain.exponentialRampToValueAtTime(0.0001, context.currentTime + 0.28)
     oscillator.connect(gain)
-    gain.connect(context.destination)
+    gain.connect(outputGain)
     oscillator.start()
     oscillator.stop(context.currentTime + 0.3)
     setStatus('已播放測試音；若沒有聽見，請檢查裝置音量與耳機輸出。')
