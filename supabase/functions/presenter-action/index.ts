@@ -5,6 +5,7 @@ type ParticipantRecord = { id: string; name: string }
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer', 'pronunciation', 'oral_response'])
 const speakerLanguages = new Set(['zh-tw', 'en'])
+const captionDisplayLanguages = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
 const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
 
 function randomIndex(length: number) {
@@ -141,6 +142,7 @@ Deno.serve(async (req) => {
       if (['idle', 'starting', 'live', 'error'].includes(input.captionStatus)) values.caption_status = input.captionStatus
       const hasCaptionConfiguration = [
         input.captionSourceLanguage,
+        input.captionDisplayLanguage,
         input.captionFontSize,
         input.captionFontBold,
         input.interpretationAudioEnabled,
@@ -151,6 +153,10 @@ Deno.serve(async (req) => {
           ? input.captionSourceLanguage.trim().toLowerCase()
           : ''
         if (!speakerLanguages.has(sourceLanguage)) return jsonResponse({ message: '講師字幕語言不支援。' }, 400)
+        const displayLanguage = typeof input.captionDisplayLanguage === 'string'
+          ? input.captionDisplayLanguage.trim().toLowerCase()
+          : ''
+        if (!captionDisplayLanguages.has(displayLanguage)) return jsonResponse({ message: '字幕顯示語言不支援。' }, 400)
         const interpretationLanguages = Array.isArray(input.interpretationLanguages)
           ? [...new Set(input.interpretationLanguages.filter((language: unknown): language is string => (
             typeof language === 'string' && interpretationLanguagesSupported.has(language) && language !== sourceLanguage
@@ -158,7 +164,7 @@ Deno.serve(async (req) => {
           : []
         const interpretationAudioEnabled = Boolean(input.interpretationAudioEnabled) && interpretationLanguages.length > 0
         values.caption_source_language = sourceLanguage
-        values.caption_display_language = sourceLanguage
+        values.caption_display_language = displayLanguage
         if (input.captionFontSize !== undefined) {
           const captionFontSize = Number(input.captionFontSize)
           if (!Number.isInteger(captionFontSize) || captionFontSize < 24 || captionFontSize > 96) {

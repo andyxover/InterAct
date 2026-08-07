@@ -5,7 +5,7 @@ type Props = {
   status?: 'idle' | 'starting' | 'live' | 'error'
 }
 
-export function LiveCaptionOverlay({ fontBold = true, fontSize = 48, text, status = 'live' }: Props) {
+export function LiveCaptionOverlay({ fontBold = false, fontSize = 42, text, status = 'live' }: Props) {
   if (!text && status !== 'starting') return null
   return (
     <div className="live-caption-overlay" aria-live="polite">

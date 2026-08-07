@@ -10,9 +10,10 @@ const APP_EXECUTABLE_PATH = process.env.PORTABLE_EXECUTABLE_FILE || process.exec
 const APP_RELAUNCH_ICON_PATH = isDesktopDev ? APP_WINDOW_ICON_PATH : APP_EXECUTABLE_PATH
 const CONTROL_COLLAPSED = { width: 194, height: 242 }
 const CONTROL_EXPANDED = { width: 420, height: 760 }
+const CONTROL_WITH_SETTINGS = { width: 1100, height: 760 }
 const WINDOW_MARGIN = 12
 const TOPMOST_LEVEL = 'screen-saver'
-const CONTROL_RELATIVE_LEVEL = 0
+const CONTROL_RELATIVE_LEVEL = 6
 const OVERLAY_RELATIVE_LEVEL = 2
 const WORD_CLOUD_RELATIVE_LEVEL = 4
 
@@ -366,10 +367,10 @@ function clamp(value, minimum, maximum) {
   return Math.max(minimum, Math.min(value, maximum))
 }
 
-function setControlBounds(expanded, snapToTopRight = false) {
+function setControlBounds(expanded, snapToTopRight = false, settingsOpen = false) {
   if (!mainWindow) return
 
-  const size = expanded ? CONTROL_EXPANDED : CONTROL_COLLAPSED
+  const size = settingsOpen ? CONTROL_WITH_SETTINGS : expanded ? CONTROL_EXPANDED : CONTROL_COLLAPSED
   const current = lastControlBounds || mainWindow.getBounds()
   const display = displayForBounds(current)
   const workArea = display.workArea
@@ -415,8 +416,8 @@ ipcMain.handle('window:presenter-mode', (_event, sessionId) => {
   createOverlayWindow(sessionId)
 })
 
-ipcMain.handle('window:set-expanded', (_event, expanded) => {
-  setControlBounds(Boolean(expanded))
+ipcMain.handle('window:set-expanded', (_event, expanded, settingsOpen = false) => {
+  setControlBounds(Boolean(expanded), false, Boolean(settingsOpen))
 })
 
 ipcMain.handle('lottery:set-interactive', (_event, enabled) => {
