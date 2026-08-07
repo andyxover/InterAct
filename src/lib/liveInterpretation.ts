@@ -1,28 +1,26 @@
 import type { RealtimeChannel } from '@supabase/supabase-js'
 import { requireSupabase } from './supabase'
 
-const CHUNK_DURATION_MS = 800
+const CHUNK_DURATION_MS = 250
 const AUDIO_SAMPLE_RATE = 24_000
+const AUDIO_PACKET_HEADER_BYTES = 8
 
 export type InterpretationAudioBroadcaster = {
   close: () => void
 }
 
-function arrayBufferToBase64(value: ArrayBuffer) {
-  const bytes = new Uint8Array(value)
-  let binary = ''
-  for (let offset = 0; offset < bytes.length; offset += 0x8000) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + 0x8000))
-  }
-  return window.btoa(binary)
-}
-
 function encodePcm16(samples: Float32Array) {
-  const buffer = new ArrayBuffer(samples.length * 2)
+  const buffer = new ArrayBuffer(AUDIO_PACKET_HEADER_BYTES + samples.length * 2)
   const view = new DataView(buffer)
+  // IAP1 (InterAct Audio Packet v1), followed by the little-endian sample rate.
+  view.setUint8(0, 0x49)
+  view.setUint8(1, 0x41)
+  view.setUint8(2, 0x50)
+  view.setUint8(3, 0x31)
+  view.setUint32(4, AUDIO_SAMPLE_RATE, true)
   for (let index = 0; index < samples.length; index += 1) {
     const sample = Math.max(-1, Math.min(1, samples[index]))
-    view.setInt16(index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
+    view.setInt16(AUDIO_PACKET_HEADER_BYTES + index * 2, sample < 0 ? sample * 0x8000 : sample * 0x7fff, true)
   }
   return buffer
 }
@@ -71,12 +69,7 @@ export async function createInterpretationAudioBroadcaster(
 
   const sendChunk = (samples: Float32Array) => {
     sendQueue = sendQueue.then(async () => {
-      const payload = {
-        audioBase64: arrayBufferToBase64(encodePcm16(samples)),
-        encoding: 'pcm16le',
-        sampleRate: audioContext.sampleRate,
-      }
-      const result = await channel.send({ type: 'broadcast', event: 'audio', payload })
+      const result = await channel.send({ type: 'broadcast', event: 'audio', payload: encodePcm16(samples) })
       if (result !== 'ok') throw new Error('即時口譯音訊送出失敗。')
     }).catch((error: unknown) => onError(error instanceof Error ? error.message : '即時口譯音訊送出失敗。'))
   }

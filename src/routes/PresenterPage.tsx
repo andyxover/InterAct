@@ -96,6 +96,9 @@ export function PresenterPage() {
   const interpretationBroadcastersRef = useRef<Array<{ close: () => void }>>([])
   const pendingCaptionWritesRef = useRef<Set<Promise<void>>>(new Set())
   const captionRetryTimersRef = useRef<number[]>([])
+  const captionDisplayTimersRef = useRef<Map<string, number>>(new Map())
+  const captionHideTimersRef = useRef<Map<string, number>>(new Map())
+  const pendingDisplayCaptionsRef = useRef<Map<string, string>>(new Map())
   const captionRunIdRef = useRef(0)
   const captionStreamRef = useRef<MediaStream | null>(null)
   const captionChannelRef = useRef<RealtimeChannel | null>(null)
@@ -106,6 +109,46 @@ export function PresenterPage() {
     () => participants.filter((participant) => onlineParticipantIds.includes(participant.id)),
     [onlineParticipantIds, participants],
   )
+
+  const clearCaptionDisplayTimers = useCallback(() => {
+    for (const timer of captionDisplayTimersRef.current.values()) window.clearTimeout(timer)
+    for (const timer of captionHideTimersRef.current.values()) window.clearTimeout(timer)
+    captionDisplayTimersRef.current.clear()
+    captionHideTimersRef.current.clear()
+    pendingDisplayCaptionsRef.current.clear()
+  }, [])
+
+  const publishLiveCaption = useCallback((language: string, text: string, final: boolean) => {
+    pendingDisplayCaptionsRef.current.set(language, text)
+    const flush = (isFinal: boolean) => {
+      const latest = pendingDisplayCaptionsRef.current.get(language) || ''
+      pendingDisplayCaptionsRef.current.delete(language)
+      setLiveCaptions((current) => ({ ...current, [language]: latest }))
+      void captionChannelRef.current?.send({
+        type: 'broadcast',
+        event: 'caption',
+        payload: { language, text: latest, final: isFinal, createdAt: new Date().toISOString() },
+      })
+
+      window.clearTimeout(captionHideTimersRef.current.get(language))
+      captionHideTimersRef.current.set(language, window.setTimeout(() => {
+        setLiveCaptions((current) => current[language] === latest ? { ...current, [language]: '' } : current)
+        captionHideTimersRef.current.delete(language)
+      }, 2000))
+    }
+
+    if (final) {
+      window.clearTimeout(captionDisplayTimersRef.current.get(language))
+      captionDisplayTimersRef.current.delete(language)
+      flush(true)
+      return
+    }
+    if (captionDisplayTimersRef.current.has(language)) return
+    captionDisplayTimersRef.current.set(language, window.setTimeout(() => {
+      captionDisplayTimersRef.current.delete(language)
+      flush(false)
+    }, 180))
+  }, [])
 
   const loadAll = useCallback(async () => {
     if (!isSupabaseConfigured || !sessionId) return
@@ -335,6 +378,7 @@ export function PresenterPage() {
     if (pendingCaptionWritesRef.current.size) {
       await Promise.allSettled([...pendingCaptionWritesRef.current])
     }
+    clearCaptionDisplayTimers()
     setLiveCaptions({})
     setCaptionError('')
     await captionChannelRef.current?.send({ type: 'broadcast', event: 'caption', payload: { cleared: true } })
@@ -348,7 +392,7 @@ export function PresenterPage() {
         await loadAll()
       }
     }
-  }, [loadAll, sessionId])
+  }, [clearCaptionDisplayTimers, loadAll, sessionId])
 
   async function startCourseRecording(targetSession: Session | null = session, microphoneId = selectedMicrophoneId) {
     if (!targetSession || captionConnectionsRef.current.length) return
@@ -422,12 +466,7 @@ export function PresenterPage() {
       }
       const onCaption = ({ language, text, final }: { language: string; text: string; final: boolean }) => {
         const normalizedText = normalizeCaptionText(language, text)
-        setLiveCaptions((current) => ({ ...current, [language]: normalizedText }))
-        void captionChannelRef.current?.send({
-          type: 'broadcast',
-          event: 'caption',
-          payload: { language, text: normalizedText, final, createdAt: new Date().toISOString() },
-        })
+        publishLiveCaption(language, normalizedText, final)
         if (final) {
           const write = persistCaption(language, normalizedText)
           pendingCaptionWritesRef.current.add(write)
@@ -600,10 +639,11 @@ export function PresenterPage() {
   }
 
   useEffect(() => () => {
+    clearCaptionDisplayTimers()
     for (const broadcaster of interpretationBroadcastersRef.current) broadcaster.close()
     for (const connection of captionConnectionsRef.current) connection.close()
     for (const track of captionStreamRef.current?.getTracks() || []) track.stop()
-  }, [])
+  }, [clearCaptionDisplayTimers])
 
   async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {
     const presenterToken = getPresenterToken(sessionId)

@@ -417,7 +417,10 @@ ipcMain.handle('window:presenter-mode', (_event, sessionId) => {
 })
 
 ipcMain.handle('window:set-expanded', (_event, expanded, settingsOpen = false) => {
-  setControlBounds(Boolean(expanded), false, Boolean(settingsOpen))
+  // Reapplying always-on-top closes native Windows select popups. Temporarily
+  // suspend the presenter topmost reinforcement while settings are interactive.
+  setPresenterTopmost(!settingsOpen)
+  setControlBounds(Boolean(expanded), false, settingsOpen)
 })
 
 ipcMain.handle('lottery:set-interactive', (_event, enabled) => {
