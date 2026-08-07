@@ -140,6 +140,9 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
 
   addOverviewSection(overview, 'AI 整節課分析', [
     ['總結', analysis.executive_summary],
+    ...(analysis.lesson_key_points?.length
+      ? [['課堂重點整理', listText(analysis.lesson_key_points)] as [string, string]]
+      : []),
     ['互動程度', analysis.engagement_analysis.level],
     ['互動分析', analysis.engagement_analysis.summary],
     ['參與觀察', listText(analysis.engagement_analysis.participation_observations)],
@@ -333,6 +336,24 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
   sharedContents.getColumn('createdAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
   sharedContents.getColumn('url').font = { color: { argb: COLORS.primary }, underline: true }
   styleTableSheet(sharedContents)
+
+  const captions = workbook.addWorksheet('即時字幕逐字稿')
+  captions.columns = [
+    { header: '時間', key: 'createdAt', width: 22 },
+    { header: '語言', key: 'language', width: 14 },
+    { header: '類型', key: 'kind', width: 12 },
+    { header: '字幕內容', key: 'text', width: 100 },
+  ]
+  for (const segment of data.captionSegments) {
+    captions.addRow({
+      createdAt: formatDate(segment.created_at),
+      language: segment.language,
+      kind: segment.is_translation ? '翻譯' : '原文',
+      text: segment.text,
+    })
+  }
+  captions.getColumn('createdAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
+  styleTableSheet(captions)
 
   const exitTickets = workbook.addWorksheet('Exit Ticket')
   exitTickets.columns = [

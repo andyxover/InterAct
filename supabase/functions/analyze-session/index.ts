@@ -6,6 +6,7 @@ const sessionAnalysisSchema = {
   additionalProperties: false,
   properties: {
     executive_summary: { type: 'string' },
+    lesson_key_points: { type: 'array', items: { type: 'string' } },
     engagement_analysis: {
       type: 'object',
       additionalProperties: false,
@@ -53,7 +54,7 @@ const sessionAnalysisSchema = {
     },
     limitations: { type: 'array', items: { type: 'string' } },
   },
-  required: ['executive_summary', 'engagement_analysis', 'learning_analysis', 'teaching_recommendations', 'limitations'],
+  required: ['executive_summary', 'lesson_key_points', 'engagement_analysis', 'learning_analysis', 'teaching_recommendations', 'limitations'],
 }
 
 function roundPercent(value: number) {
@@ -114,14 +115,15 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (cached?.input_json?.analysis_version === 3) {
+    if (cached?.input_json?.analysis_version === 5) {
       return jsonResponse({ analysis: cached.output_json, metrics: cached.input_json?.metrics, cached: true })
     }
 
-    const [participantResult, messageResult, sharedContentResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult] = await Promise.all([
+    const [participantResult, messageResult, sharedContentResult, captionResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult] = await Promise.all([
       supabase.from('participants').select('id').eq('session_id', sessionId).order('joined_at').limit(5000),
       supabase.from('messages').select('participant_id, content, created_at').eq('session_id', sessionId).order('created_at').limit(5000),
       supabase.from('shared_contents').select('body, url, created_at').eq('session_id', sessionId).order('created_at').limit(1000),
+      supabase.from('caption_segments').select('language, source_language, text, is_translation, created_at').eq('session_id', sessionId).order('created_at').limit(10000),
       supabase.from('questions').select('*').eq('session_id', sessionId).order('created_at').limit(500),
       supabase.from('answers').select('question_id, participant_id, answer_value, answer_values, answer_text, is_correct').eq('session_id', sessionId).order('submitted_at').limit(10000),
       supabase.from('audio_responses').select('question_id, analysis_status, detected_language, transcript, score, analysis_json, submitted_at').eq('session_id', sessionId).order('submitted_at').limit(10000),
@@ -129,13 +131,14 @@ Deno.serve(async (req) => {
       supabase.from('exit_tickets').select('most_useful, still_confused, understanding_score, engagement_score, next_suggestion, response_text, rating').eq('session_id', sessionId).order('submitted_at').limit(5000),
     ])
 
-    for (const result of [participantResult, messageResult, sharedContentResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult]) {
+    for (const result of [participantResult, messageResult, sharedContentResult, captionResult, questionResult, answerResult, audioResponseResult, questionAnalysisResult, exitTicketResult]) {
       if (result.error) throw result.error
     }
 
     const participants = participantResult.data || []
     const messages = messageResult.data || []
     const sharedContents = sharedContentResult.data || []
+    const captionSegments = captionResult.data || []
     const questions = questionResult.data || []
     const answers = answerResult.data || []
     const audioResponses = audioResponseResult.data || []
@@ -211,7 +214,7 @@ Deno.serve(async (req) => {
     }
 
     summaryInput = {
-      analysis_version: 3,
+      analysis_version: 5,
       session: {
         title: session.title,
         created_at: session.created_at,
@@ -227,16 +230,21 @@ Deno.serve(async (req) => {
         text: content.body,
         url: content.url,
       })),
+      lesson_transcript: captionSegments
+        .filter((segment) => !segment.is_translation)
+        .slice(-5000)
+        .map((segment, index) => ({ number: index + 1, spoken_at: segment.created_at, language: segment.language, text: segment.text })),
       danmaku_content_sample: messages.slice(-500).map((message, index) => ({ number: index + 1, content: message.content })),
       exit_tickets: exitTickets.slice(0, 500).map((ticket, index) => ({ response_number: index + 1, ...ticket })),
     }
 
     const result = await callAiJson(
-      '你是 InterAct 的課堂互動與形成性評量分析顧問。請以繁體中文根據匿名化統計、講師派送的課程文字與連結、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。instructor_shared_contents 是講師提供的課程參考資料，可用來理解課程脈絡，但不可當成學生意見或學習證據。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
+      '你是 InterAct 的課堂互動與形成性評量分析顧問。請以繁體中文根據匿名化統計、講師派送的課程文字與連結、課堂原文逐字稿、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告。lesson_transcript 是講師授課內容：若有內容，lesson_key_points 必須將整節課整理成精煉、具結構且可直接給教師與學生閱讀的課堂重點，不可逐句照抄、不可顯示逐字稿；若 lesson_transcript 為空，lesson_key_points 必須回傳空陣列。逐字稿可用來核對互動脈絡與提出教學建議，但不可把講師說的話誤認為學生意見或學習證據。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。instructor_shared_contents 是講師提供的課程參考資料。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
       summaryInput,
       sessionAnalysisSchema,
     )
     if (result.status !== 'success') throw new Error(JSON.stringify(result.output).slice(0, 1000))
+    if (!summaryInput.lesson_transcript.length) result.output.lesson_key_points = []
 
     const { error: insertError } = await supabase.from('ai_summaries').insert({
       session_id: sessionId,

@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
+import { ParticipantInterpretationAudio } from '../components/ParticipantInterpretationAudio'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { ExitTicketForm } from '../components/ExitTicketForm'
 import { LotteryOverlay } from '../components/LotteryOverlay'
@@ -335,6 +336,14 @@ export function ParticipantPage() {
               </div>
             </div>
             <div className="participant-summary-content">
+              {sessionSummary.lesson_key_points?.length > 0 && (
+                <div className="participant-summary-section">
+                  <h3><BookOpen size={18} />課堂重點整理</h3>
+                  <ul>
+                    {sessionSummary.lesson_key_points.map((item) => <li key={item}>{item}</li>)}
+                  </ul>
+                </div>
+              )}
               <p className="participant-summary-lead">{sessionSummary.executive_summary}</p>
               <div className="participant-summary-section">
                 <h3><BookOpen size={18} />學習整理</h3>
@@ -381,6 +390,13 @@ export function ParticipantPage() {
           <strong>{participant?.name || '與會者'}</strong>，歡迎加入{session?.title || 'InterAct 場次'}
         </h1>
       </header>
+      {session && (
+        <ParticipantInterpretationAudio
+          enabled={session.interpretation_enabled && session.interpretation_audio_enabled}
+          languages={session.interpretation_languages}
+          sessionId={sessionId}
+        />
+      )}
       {session?.exit_ticket_prompt && session.exit_ticket_category && (
         <div className="participant-exit-ticket-priority">
           <ExitTicketForm

@@ -51,7 +51,9 @@ export function PresenterNewPage() {
     setBusy(true)
     try {
       const { data, error: createError } = await requireSupabase().functions.invoke('create-session', {
-        body: { title: title.trim() || '未命名場次' },
+        body: {
+          title: title.trim() || '未命名場次',
+        },
         headers: { 'x-interact-client': 'windows-app' },
       })
 

@@ -1,9 +1,9 @@
-import { useCallback, useEffect, useMemo, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, LoaderCircle, MessageSquareText, RefreshCw, Users } from 'lucide-react'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
-import type { AiSummary, Answer, AudioResponse, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, CaptionSegment, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
@@ -68,16 +68,18 @@ export function SessionReportPage() {
   const [loading, setLoading] = useState(true)
   const [exporting, setExporting] = useState(false)
   const [error, setError] = useState('')
+  const automaticLoadKeyRef = useRef('')
 
   const loadReportData = useCallback(async () => {
     const supabase = requireSupabase()
     const { data: session, error: sessionError } = await supabase.from('sessions').select('*').eq('id', sessionId).single()
     if (sessionError) throw sessionError
 
-    const [participants, messages, sharedContents, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
+    const [participants, messages, sharedContents, captionSegments, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
       fetchAllRows<Participant>('participants', sessionId, 'joined_at'),
       fetchAllRows<Message>('messages', sessionId, 'created_at'),
       fetchAllRows<SharedContent>('shared_contents', sessionId, 'created_at'),
+      fetchAllRows<CaptionSegment>('caption_segments', sessionId, 'created_at'),
       fetchAllRows<Screenshot>('screenshots', sessionId, 'created_at'),
       fetchAllRows<Question>('questions', sessionId, 'created_at'),
       fetchAllRows<Answer>('answers', sessionId, 'submitted_at'),
@@ -97,6 +99,7 @@ export function SessionReportPage() {
       participants,
       messages,
       sharedContents,
+      captionSegments,
       screenshots,
       questions,
       answers,
@@ -161,12 +164,15 @@ export function SessionReportPage() {
   }, [loadReportData, sessionId])
 
   useEffect(() => {
+    const loadKey = `${sessionId}:${generateRequested ? 'generate' : 'saved'}`
+    if (automaticLoadKeyRef.current === loadKey) return
+    automaticLoadKeyRef.current = loadKey
     if (generateRequested) {
       void generateReport()
     } else {
       void loadSavedReport()
     }
-  }, [generateReport, generateRequested, loadSavedReport])
+  }, [generateReport, generateRequested, loadSavedReport, sessionId])
 
   const questionMeta = useMemo(
     () => new Map((reportData?.questions || []).map((question, index) => [question.id, {
@@ -196,7 +202,7 @@ export function SessionReportPage() {
         <LoaderCircle className="spin" size={34} />
         <h1>{generateRequested ? 'AI 正在分析整節課' : '正在讀取課堂報告'}</h1>
         <p className="muted">
-          {generateRequested ? '彙整題目、作答、彈幕與參與資料...' : '載入已產生的課堂分析與互動資料...'}
+          {generateRequested ? '彙整字幕逐字稿、文字派送、題目、作答、彈幕與參與資料...' : '載入已產生的課堂分析與互動資料...'}
         </p>
         <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
           <ArrowLeft size={17} />返回場次管理
@@ -263,6 +269,18 @@ export function SessionReportPage() {
         <p className="report-lead">{analysis.executive_summary}</p>
         <p>{analysis.engagement_analysis.summary}</p>
       </section>
+
+      {analysis.lesson_key_points?.length ? (
+        <section className="report-section report-summary-band">
+          <div className="report-section-heading">
+            <BookOpen size={20} />
+            <h2>課堂重點整理</h2>
+          </div>
+          <ul>
+            {analysis.lesson_key_points.map((point) => <li key={point}>{point}</li>)}
+          </ul>
+        </section>
+      ) : null}
 
       <section className="report-section">
         <h2>課堂文字與連結派送</h2>
