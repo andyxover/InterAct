@@ -18,7 +18,7 @@ import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
-import type { AiSummary, Answer, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
+import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
 import { useParams } from 'react-router-dom'
 
 export function PresenterPage() {
@@ -30,6 +30,7 @@ export function PresenterPage() {
   const [selectedQuestionId, setSelectedQuestionId] = useState<string | null>(null)
   const [question, setQuestion] = useState<Question | null>(null)
   const [answers, setAnswers] = useState<Answer[]>([])
+  const [audioResponses, setAudioResponses] = useState<AudioResponse[]>([])
   const [exitTickets, setExitTickets] = useState<ExitTicket[]>([])
   const [analysis, setAnalysis] = useState<QuestionAnalysis | null>(null)
   const [analysisBusy, setAnalysisBusy] = useState(false)
@@ -108,9 +109,22 @@ export function PresenterPage() {
       setQuestion(questionData as Question | null)
       setAnswers((answerData || []) as Answer[])
       setAnalysis(((summaryData as AiSummary | null)?.output_json as QuestionAnalysis | undefined) || null)
+      const loadedQuestion = questionData as Question | null
+      if (loadedQuestion && ['pronunciation', 'oral_response'].includes(loadedQuestion.type) && loadedQuestion.status !== 'active') {
+        const presenterToken = getPresenterToken(sessionId)
+        if (presenterToken) {
+          const { data: recordingData } = await supabase.functions.invoke('presenter-action', {
+            body: { action: 'get_recording_results', sessionId, presenterToken, questionId: targetQuestionId },
+          })
+          setAudioResponses((recordingData?.responses || []) as AudioResponse[])
+        }
+      } else {
+        setAudioResponses([])
+      }
     } else {
       setQuestion(null)
       setAnswers([])
+      setAudioResponses([])
       setAnalysis(null)
     }
   }, [selectedQuestionId, sessionId])
@@ -840,6 +854,7 @@ export function PresenterPage() {
           analysisBusy={analysisBusy}
           analysisError={analysisError}
           answers={answers}
+          audioResponses={audioResponses}
           busy={busy}
           isCurrentQuestion={question?.id === session.current_question_id}
           onlineCount={onlineParticipants.length}

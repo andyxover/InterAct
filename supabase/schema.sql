@@ -32,6 +32,12 @@ create table if not exists public.presenter_session_keys (
   created_at timestamptz not null default now()
 );
 
+create table if not exists public.participant_session_keys (
+  participant_id uuid primary key references public.participants(id) on delete cascade,
+  token_hash text not null,
+  created_at timestamptz not null default now()
+);
+
 create table if not exists public.messages (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
@@ -57,7 +63,7 @@ create table if not exists public.questions (
   id uuid primary key default gen_random_uuid(),
   session_id uuid not null references public.sessions(id) on delete cascade,
   screenshot_id uuid null references public.screenshots(id) on delete set null,
-  type text not null check (type in ('send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer')),
+  type text not null check (type in ('send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer', 'pronunciation', 'oral_response')),
   status text not null default 'active' check (status in ('draft', 'active', 'stopped', 'closed')),
   title text not null default '',
   prompt_text text null,
@@ -86,6 +92,27 @@ create table if not exists public.answers (
   answer_text text null,
   is_correct boolean null,
   submitted_at timestamptz not null default now(),
+  unique (question_id, participant_id)
+);
+
+create table if not exists public.audio_responses (
+  id uuid primary key default gen_random_uuid(),
+  session_id uuid not null references public.sessions(id) on delete cascade,
+  question_id uuid not null references public.questions(id) on delete cascade,
+  participant_id uuid not null references public.participants(id) on delete cascade,
+  participant_name text not null,
+  storage_path text not null unique,
+  mime_type text not null,
+  duration_ms integer not null check (duration_ms between 250 and 60000),
+  file_size integer not null check (file_size between 1 and 10485760),
+  analysis_status text not null default 'pending' check (analysis_status in ('pending', 'success', 'failed')),
+  detected_language text null,
+  transcript text null,
+  score integer null check (score between 0 and 100),
+  analysis_json jsonb null,
+  error_message text null,
+  submitted_at timestamptz not null default now(),
+  analyzed_at timestamptz null,
   unique (question_id, participant_id)
 );
 
@@ -146,6 +173,9 @@ create index if not exists ai_summaries_question_id_idx on public.ai_summaries (
 create index if not exists ai_summaries_session_id_idx on public.ai_summaries (session_id);
 create index if not exists answers_participant_id_idx on public.answers (participant_id);
 create index if not exists answers_session_id_idx on public.answers (session_id);
+create index if not exists audio_responses_session_id_idx on public.audio_responses (session_id);
+create index if not exists audio_responses_question_id_idx on public.audio_responses (question_id);
+create index if not exists audio_responses_participant_id_idx on public.audio_responses (participant_id);
 create index if not exists exit_tickets_participant_id_idx on public.exit_tickets (participant_id);
 create index if not exists messages_participant_id_idx on public.messages (participant_id);
 create index if not exists messages_session_id_idx on public.messages (session_id);
@@ -208,10 +238,12 @@ grant execute on function public.claim_buzzer(uuid, uuid, uuid) to service_role;
 alter table public.sessions enable row level security;
 alter table public.participants enable row level security;
 alter table public.presenter_session_keys enable row level security;
+alter table public.participant_session_keys enable row level security;
 alter table public.messages enable row level security;
 alter table public.screenshots enable row level security;
 alter table public.questions enable row level security;
 alter table public.answers enable row level security;
+alter table public.audio_responses enable row level security;
 alter table public.ai_summaries enable row level security;
 alter table public.exit_tickets enable row level security;
 alter table public.shared_contents enable row level security;
@@ -313,6 +345,9 @@ grant select on public.sessions, public.screenshots, public.questions, public.ai
 grant select, insert on public.participants to anon, authenticated;
 grant select, insert on public.messages, public.answers, public.exit_tickets to anon, authenticated;
 
+revoke all on public.participant_session_keys, public.audio_responses from public, anon, authenticated;
+grant all on public.participant_session_keys, public.audio_responses to service_role;
+
 alter publication supabase_realtime add table public.sessions;
 alter publication supabase_realtime add table public.participants;
 alter publication supabase_realtime add table public.messages;
@@ -327,3 +362,10 @@ alter publication supabase_realtime add table public.session_events;
 insert into storage.buckets (id, name, public)
 values ('interact-screenshots', 'interact-screenshots', true)
 on conflict (id) do update set public = excluded.public;
+
+insert into storage.buckets (id, name, public, file_size_limit, allowed_mime_types)
+values ('interact-recordings', 'interact-recordings', false, 10485760, array['audio/wav']::text[])
+on conflict (id) do update set
+  public = excluded.public,
+  file_size_limit = excluded.file_size_limit,
+  allowed_mime_types = excluded.allowed_mime_types;

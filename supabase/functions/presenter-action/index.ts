@@ -3,7 +3,7 @@ import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 type ParticipantRecord = { id: string; name: string }
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
-const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer'])
+const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer', 'pronunciation', 'oral_response'])
 
 function randomIndex(length: number) {
   if (length <= 1) return 0
@@ -44,6 +44,25 @@ function normalizedOptions(value: unknown) {
     .slice(0, 20)
 }
 
+async function listStorageFiles(
+  supabase: ReturnType<typeof getAdminClient>,
+  bucket: string,
+  prefix: string,
+): Promise<string[]> {
+  const files: string[] = []
+  for (let offset = 0; ; offset += 1000) {
+    const { data, error } = await supabase.storage.from(bucket).list(prefix, { limit: 1000, offset })
+    if (error) throw error
+    for (const item of data || []) {
+      const path = `${prefix}/${item.name}`
+      if (item.id) files.push(path)
+      else files.push(...await listStorageFiles(supabase, bucket, path))
+    }
+    if (!data || data.length < 1000) break
+  }
+  return files
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonResponse({ message: 'Method not allowed.' }, 405)
@@ -62,7 +81,7 @@ Deno.serve(async (req) => {
             if (typeof candidate.sessionId !== 'string' || typeof candidate.presenterToken !== 'string') return null
             return { sessionId: candidate.sessionId, presenterToken: candidate.presenterToken }
           })
-          .filter((credential): credential is { sessionId: string; presenterToken: string } => Boolean(credential))
+          .filter((credential: { sessionId: string; presenterToken: string } | null): credential is { sessionId: string; presenterToken: string } => Boolean(credential))
           .slice(0, 100)
         : []
       if (!credentials.length) return jsonResponse({ sessions: [] })
@@ -162,6 +181,8 @@ Deno.serve(async (req) => {
         multiple_choice: '選擇題',
         true_false: '是非題',
         short_answer: '問答題',
+        pronunciation: '發音正確度',
+        oral_response: '口語回應',
       }
       const { data: objectList, error: objectError } = await supabase.storage
         .from('interact-screenshots')
@@ -230,6 +251,35 @@ Deno.serve(async (req) => {
       if (error) throw error
       if (!data) return jsonResponse({ message: '題目已停止或不存在。' }, 409)
       return jsonResponse({ question: data })
+    }
+
+    if (action === 'get_recording_results') {
+      const questionId = input.questionId
+      if (!validUuid(questionId)) return jsonResponse({ message: '題目資料格式不正確。' }, 400)
+      const { data: question, error: questionError } = await supabase
+        .from('questions')
+        .select('id, status, type')
+        .eq('id', questionId)
+        .eq('session_id', sessionId)
+        .maybeSingle()
+      if (questionError) throw questionError
+      if (!question || !['pronunciation', 'oral_response'].includes(question.type)) {
+        return jsonResponse({ message: '找不到錄音題目。' }, 404)
+      }
+      if (question.status === 'active') return jsonResponse({ responses: [] })
+
+      const { data: responses, error } = await supabase
+        .from('audio_responses')
+        .select('id, session_id, question_id, participant_id, participant_name, storage_path, mime_type, duration_ms, analysis_status, detected_language, transcript, score, analysis_json, error_message, submitted_at, analyzed_at')
+        .eq('question_id', questionId)
+        .order('submitted_at')
+      if (error) throw error
+      const signedResponses = await Promise.all((responses || []).map(async (response) => {
+        const { data: signed } = await supabase.storage.from('interact-recordings').createSignedUrl(response.storage_path, 3600)
+        const { storage_path: _storagePath, ...safeResponse } = response
+        return { ...safeResponse, signed_url: signed?.signedUrl || null }
+      }))
+      return jsonResponse({ responses: signedResponses })
     }
 
     if (action === 'grade_question') {
@@ -319,6 +369,33 @@ Deno.serve(async (req) => {
         const { error: storageError } = await supabase.storage
           .from('interact-screenshots')
           .remove(paths.slice(index, index + 100))
+        if (storageError) throw storageError
+      }
+
+      const { data: recordings, error: recordingListError } = await supabase
+        .from('audio_responses')
+        .select('storage_path')
+        .eq('session_id', sessionId)
+      if (recordingListError) throw recordingListError
+      const recordingPaths = (recordings || []).map((recording) => recording.storage_path).filter(Boolean)
+      for (let index = 0; index < recordingPaths.length; index += 100) {
+        const { error: storageError } = await supabase.storage
+          .from('interact-recordings')
+          .remove(recordingPaths.slice(index, index + 100))
+        if (storageError) throw storageError
+      }
+
+      const orphanRecordingPaths = await listStorageFiles(
+        supabase,
+        'interact-recordings',
+        `sessions/${sessionId}/recordings`,
+      )
+      const knownRecordingPaths = new Set(recordingPaths)
+      const orphanPaths = orphanRecordingPaths.filter((path) => !knownRecordingPaths.has(path))
+      for (let index = 0; index < orphanPaths.length; index += 100) {
+        const { error: storageError } = await supabase.storage
+          .from('interact-recordings')
+          .remove(orphanPaths.slice(index, index + 100))
         if (storageError) throw storageError
       }
 

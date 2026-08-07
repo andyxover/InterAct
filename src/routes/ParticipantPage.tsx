@@ -19,15 +19,18 @@ import {
 } from '../lib/messageLimit'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
-import type { AiSummary, Answer, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
 
 export function ParticipantPage() {
   const { sessionId = '' } = useParams()
   const participantId = localStorage.getItem(`interact_participant_${sessionId}`)
+  const participantToken = localStorage.getItem(`interact_participant_token_${sessionId}`)
   const [participant, setParticipant] = useState<Participant | null>(null)
   const [session, setSession] = useState<Session | null>(null)
   const [question, setQuestion] = useState<Question | null>(null)
   const [answer, setAnswer] = useState<Answer | null>(null)
+  const [audioResponse, setAudioResponse] = useState<AudioResponse | null>(null)
+  const [audioBusy, setAudioBusy] = useState(false)
   const [screenshot, setScreenshot] = useState<Screenshot | null>(null)
   const [exitTicket, setExitTicket] = useState<ExitTicket | null>(null)
   const [sessionSummary, setSessionSummary] = useState<SessionAnalysis | null>(null)
@@ -82,6 +85,21 @@ export function ParticipantPage() {
       setQuestion(nextQuestion)
       setAnswer((answerData as Answer | null) || null)
 
+      if (nextQuestion && ['pronunciation', 'oral_response'].includes(nextQuestion.type) && participantToken) {
+        const { data: recordingData } = await supabase.functions.invoke('participant-action', {
+          body: {
+            action: 'get_recording_result',
+            sessionId,
+            participantId,
+            participantToken,
+            questionId: nextQuestion.id,
+          },
+        })
+        setAudioResponse((recordingData?.response as AudioResponse | null) || null)
+      } else {
+        setAudioResponse(null)
+      }
+
       if (nextQuestion?.screenshot_id) {
         const { data } = await supabase.from('screenshots').select('*').eq('id', nextQuestion.screenshot_id).single()
         setScreenshot(data as Screenshot | null)
@@ -89,9 +107,10 @@ export function ParticipantPage() {
     } else {
       setQuestion(null)
       setAnswer(null)
+      setAudioResponse(null)
       setScreenshot(null)
     }
-  }, [participantId, sessionId])
+  }, [participantId, participantToken, sessionId])
 
   useEffect(() => {
     if (!participantId) navigate(`/join/${sessionId}`)
@@ -190,6 +209,56 @@ export function ParticipantPage() {
       setAnswer(data as Answer)
     } catch (err) {
       setError(err instanceof Error ? err.message : '作答失敗，可能已經提交過。')
+    }
+  }
+
+  async function submitAudio(file: File, durationMs: number) {
+    if (!participant || !participantToken || !question || !['pronunciation', 'oral_response'].includes(question.type)) {
+      setError('找不到錄音權限，請重新掃描 QR Code 加入場次。')
+      return
+    }
+    setAudioBusy(true)
+    setError('')
+    try {
+      const supabase = requireSupabase()
+      const { data: prepared, error: prepareError } = await supabase.functions.invoke('participant-action', {
+        body: {
+          action: 'prepare_recording_upload',
+          sessionId,
+          participantId: participant.id,
+          participantToken,
+          questionId: question.id,
+          fileSize: file.size,
+        },
+      })
+      if (prepareError) throw prepareError
+      if (!prepared?.recordingId || !prepared?.storagePath || !prepared?.uploadToken) {
+        throw new Error(prepared?.message || '無法準備錄音上傳。')
+      }
+      const { error: uploadError } = await supabase.storage
+        .from('interact-recordings')
+        .uploadToSignedUrl(prepared.storagePath, prepared.uploadToken, file, { contentType: 'audio/wav' })
+      if (uploadError) throw uploadError
+
+      const { data, error: submitError } = await supabase.functions.invoke('participant-action', {
+        body: {
+          action: 'submit_recording',
+          sessionId,
+          participantId: participant.id,
+          participantToken,
+          questionId: question.id,
+          recordingId: prepared.recordingId,
+          storagePath: prepared.storagePath,
+          durationMs,
+        },
+      })
+      if (submitError) throw submitError
+      if (!data?.response) throw new Error(data?.message || '錄音送出失敗。')
+      await loadAll()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '錄音送出失敗，請稍後再試。')
+    } finally {
+      setAudioBusy(false)
     }
   }
 
@@ -325,7 +394,14 @@ export function ParticipantPage() {
       )}
       <SharedContentPanel contents={sharedContents} />
       {screenshot && <img alt="講者派送圖片" className="participant-image" src={screenshot.public_url} />}
-      <ParticipantQuestionView answer={answer} question={question} onSubmit={submitAnswer} />
+      <ParticipantQuestionView
+        answer={answer}
+        audioBusy={audioBusy}
+        audioResponse={audioResponse}
+        question={question}
+        onSubmit={submitAnswer}
+        onSubmitAudio={submitAudio}
+      />
       <form className="panel message-form" onSubmit={sendMessage}>
         <label>
           送出問題或回饋

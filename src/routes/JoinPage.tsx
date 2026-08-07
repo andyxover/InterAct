@@ -41,39 +41,18 @@ export function JoinPage() {
     try {
       if (!session) throw new Error('找不到這個場次。')
       if (session.status !== 'active') throw new Error('這堂課已經結束，無法再加入。')
-      const sessionId = session.id
       const supabase = requireSupabase()
-      const { data: latestSession, error: sessionError } = await supabase
-        .from('sessions')
-        .select('status')
-        .eq('id', sessionId)
-        .single()
-      if (sessionError) throw sessionError
-      if (latestSession.status !== 'active') {
-        setSession((current) => current ? { ...current, status: 'ended' } : current)
-        throw new Error('這堂課已經結束，無法再加入。')
-      }
       const deviceId = getDeviceId()
-      const { data: existing } = await supabase
-        .from('participants')
-        .select('*')
-        .eq('session_id', sessionId)
-        .eq('device_id', deviceId)
-        .maybeSingle()
-
-      let participant = existing as Participant | null
-      if (!participant) {
-        const { data, error: insertError } = await supabase
-          .from('participants')
-          .insert({ session_id: sessionId, name: trimmed, device_id: deviceId })
-          .select('*')
-          .single()
-
-        if (insertError) throw insertError
-        participant = data as Participant
-      }
+      const { data, error: joinError } = await supabase.functions.invoke('participant-action', {
+        body: { action: 'join_session', sessionReference, name: trimmed, deviceId },
+      })
+      if (joinError) throw joinError
+      if (!data?.participant || !data?.participantToken) throw new Error(data?.message || '加入失敗。')
+      const participant = data.participant as Participant
+      const sessionId = participant.session_id
 
       localStorage.setItem(`interact_participant_${sessionId}`, participant.id)
+      localStorage.setItem(`interact_participant_token_${sessionId}`, data.participantToken)
       localStorage.setItem(`interact_name_${sessionId}`, participant.name)
       navigate(`/participant/${sessionId}`)
     } catch (err) {

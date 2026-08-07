@@ -1,15 +1,19 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { Send } from 'lucide-react'
-import type { Answer, Question } from '../types'
+import { AudioRecorder } from './AudioRecorder'
+import type { Answer, AudioResponse, Question } from '../types'
 
 type Props = {
   question: Question | null
   answer: Answer | null
+  audioBusy: boolean
+  audioResponse: AudioResponse | null
   onSubmit: (value: string | string[]) => void
+  onSubmitAudio: (file: File, durationMs: number) => Promise<void>
 }
 
-export function ParticipantQuestionView({ question, answer, onSubmit }: Props) {
+export function ParticipantQuestionView({ question, answer, audioBusy, audioResponse, onSubmit, onSubmitAudio }: Props) {
   const [textAnswer, setTextAnswer] = useState('')
   const [selectedOptions, setSelectedOptions] = useState<string[]>([])
 
@@ -19,6 +23,7 @@ export function ParticipantQuestionView({ question, answer, onSubmit }: Props) {
   }, [question?.id])
 
   if (!question || question.type === 'send_screen') return null
+  const isAudioQuestion = question.type === 'pronunciation' || question.type === 'oral_response'
 
   function submitShortAnswer(event: FormEvent) {
     event.preventDefault()
@@ -30,7 +35,10 @@ export function ParticipantQuestionView({ question, answer, onSubmit }: Props) {
     <section className="panel participant-question">
       <h2>{question.prompt_text || question.title || '互動題'}</h2>
       {question.status !== 'active' && <p className="muted">本題已結束。</p>}
-      {answer && <p className="success">已送出答案：{answer.answer_values?.join('、') || answer.answer_value || answer.answer_text}</p>}
+      {isAudioQuestion && (
+        <AudioRecorder busy={audioBusy} question={question} response={audioResponse} onSubmit={onSubmitAudio} />
+      )}
+      {answer && !isAudioQuestion && <p className="success">已送出答案：{answer.answer_values?.join('、') || answer.answer_value || answer.answer_text}</p>}
       {!answer && question.status === 'active' && question.type === 'short_answer' && (
         <form className="short-answer-form" onSubmit={submitShortAnswer}>
           <textarea
@@ -42,7 +50,7 @@ export function ParticipantQuestionView({ question, answer, onSubmit }: Props) {
           <button type="submit"><Send size={18} />送出答案</button>
         </form>
       )}
-      {!answer && question.status === 'active' && question.type !== 'short_answer' && question.allow_multiple && (
+      {!answer && !isAudioQuestion && question.status === 'active' && question.type !== 'short_answer' && question.allow_multiple && (
         <form
           className="multi-choice-form"
           onSubmit={(event) => {
@@ -72,7 +80,7 @@ export function ParticipantQuestionView({ question, answer, onSubmit }: Props) {
           <button disabled={!selectedOptions.length} type="submit"><Send size={18} />送出答案</button>
         </form>
       )}
-      {!answer && question.status === 'active' && question.type !== 'short_answer' && !question.allow_multiple && (
+      {!answer && !isAudioQuestion && question.status === 'active' && question.type !== 'short_answer' && !question.allow_multiple && (
         <div className="choice-list">
           {question.options.map((option) => (
             <button key={option} type="button" onClick={() => onSubmit(option)}>

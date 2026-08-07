@@ -1,0 +1,147 @@
+import { CircleStop, Mic, RotateCcw } from 'lucide-react'
+import { useEffect, useRef, useState } from 'react'
+import { recordingToWav } from '../lib/audio'
+import type { AudioResponse, Question } from '../types'
+
+type Props = {
+  busy: boolean
+  question: Question
+  response: AudioResponse | null
+  onSubmit: (file: File, durationMs: number) => Promise<void>
+}
+
+const MAX_DURATION_MS = 60_000
+
+function formatDuration(milliseconds: number) {
+  const seconds = Math.max(0, Math.ceil(milliseconds / 1000))
+  return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
+}
+
+export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
+  const [recording, setRecording] = useState(false)
+  const [elapsed, setElapsed] = useState(0)
+  const [error, setError] = useState('')
+  const recorderRef = useRef<MediaRecorder | null>(null)
+  const streamRef = useRef<MediaStream | null>(null)
+  const startedAtRef = useRef(0)
+  const chunksRef = useRef<Blob[]>([])
+  const cancelledRef = useRef(false)
+
+  function releaseMicrophone() {
+    streamRef.current?.getTracks().forEach((track) => track.stop())
+    streamRef.current = null
+  }
+
+  useEffect(() => () => {
+    cancelledRef.current = true
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    releaseMicrophone()
+  }, [question.id])
+
+  useEffect(() => {
+    if (!recording) return
+    const timer = window.setInterval(() => {
+      const next = Date.now() - startedAtRef.current
+      setElapsed(next)
+      if (next >= MAX_DURATION_MS && recorderRef.current?.state === 'recording') recorderRef.current.stop()
+    }, 200)
+    return () => window.clearInterval(timer)
+  }, [recording])
+
+  async function startRecording() {
+    setError('')
+    if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
+      setError('此瀏覽器不支援錄音，請改用最新版 Chrome、Edge 或 Safari。')
+      return
+    }
+    try {
+      cancelledRef.current = false
+      const stream = await navigator.mediaDevices.getUserMedia({ audio: { echoCancellation: true, noiseSuppression: true } })
+      streamRef.current = stream
+      const preferred = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+      const recorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined)
+      recorderRef.current = recorder
+      chunksRef.current = []
+      recorder.ondataavailable = (event) => {
+        if (event.data.size) chunksRef.current.push(event.data)
+      }
+      recorder.onerror = () => {
+        setError('錄音失敗，請確認麥克風權限後重試。')
+        setRecording(false)
+        releaseMicrophone()
+      }
+      recorder.onstop = async () => {
+        const durationMs = Math.min(MAX_DURATION_MS, Date.now() - startedAtRef.current)
+        setRecording(false)
+        releaseMicrophone()
+        if (cancelledRef.current) return
+        if (durationMs < 500) {
+          setError('錄音時間太短，請至少說半秒後再停止。')
+          return
+        }
+        try {
+          const source = new Blob(chunksRef.current, { type: recorder.mimeType })
+          const wav = await recordingToWav(source)
+          await onSubmit(new File([wav], `interact-${question.id}.wav`, { type: 'audio/wav' }), durationMs)
+        } catch (caught) {
+          setError(caught instanceof Error ? caught.message : '錄音處理失敗，請重新錄製。')
+        }
+      }
+      startedAtRef.current = Date.now()
+      setElapsed(0)
+      setRecording(true)
+      recorder.start(250)
+    } catch {
+      setError('無法使用麥克風，請在瀏覽器網址列允許麥克風權限。')
+      releaseMicrophone()
+    }
+  }
+
+  function stopRecording() {
+    if (recorderRef.current?.state === 'recording') recorderRef.current.stop()
+  }
+
+  if (response) {
+    const analysis = response.analysis_json
+    return (
+      <div className="audio-response-card" aria-live="polite">
+        {question.status === 'active' ? (
+          <p className="success">錄音已送出，AI 正在分析；停止作答後會顯示評測結果。</p>
+        ) : response.analysis_status === 'success' && analysis ? (
+          <>
+            <div className="audio-score"><strong>{analysis.score}</strong><span>分</span></div>
+            <div>
+              <h3>你的個人評測</h3>
+              <p>{analysis.summary}</p>
+              <p className="muted">辨識語言：{analysis.detected_language}</p>
+            </div>
+            {response.signed_url && <audio controls preload="metadata" src={response.signed_url} />}
+            <details open><summary>錄音內容</summary><p>{analysis.transcript || '未辨識到語音內容'}</p></details>
+            <details open><summary>做得好的地方</summary><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></details>
+            <details open><summary>下一步建議</summary><ul>{analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul></details>
+          </>
+        ) : response.analysis_status === 'failed' ? (
+          <p className="error">錄音已收到，但 AI 評測未完成。請告知講師。</p>
+        ) : (
+          <p className="muted">AI 評測仍在處理中，請稍候。</p>
+        )}
+      </div>
+    )
+  }
+
+  return (
+    <div className="audio-recorder">
+      <p className="muted">最長 60 秒。請在安靜處錄音，完成後按停止。</p>
+      <button
+        className={recording ? 'recording-button active' : 'recording-button'}
+        disabled={busy}
+        type="button"
+        onClick={recording ? stopRecording : startRecording}
+      >
+        {recording ? <CircleStop size={28} /> : busy ? <RotateCcw className="spin" size={28} /> : <Mic size={28} />}
+        <span>{recording ? `停止錄音 ${formatDuration(elapsed)}` : busy ? '上傳並分析中...' : '開始錄音'}</span>
+      </button>
+      {error && <p className="error">{error}</p>}
+    </div>
+  )
+}
