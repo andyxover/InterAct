@@ -52,7 +52,7 @@ Deno.serve(async (req) => {
             audio: {
               input: {
                 transcription: { model: 'gpt-live-transcribe', languages: [sourceLanguage], delay: 'low' },
-                turn_detection: { type: 'server_vad', silence_duration_ms: 650 },
+                turn_detection: null,
               },
             },
           },

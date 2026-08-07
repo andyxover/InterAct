@@ -55,6 +55,7 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
 
   const peer = new RTCPeerConnection()
   const dataChannel = peer.createDataChannel('oai-events')
+  let commitTimer: number | null = null
   for (const track of options.stream.getAudioTracks()) peer.addTrack(track, options.stream)
 
   const buffers = new Map<string, string>()
@@ -103,6 +104,14 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
     }
   })
   dataChannel.addEventListener('error', () => options.onError('即時字幕資料連線發生錯誤。'))
+  dataChannel.addEventListener('open', () => {
+    if (options.mode !== 'transcription') return
+    commitTimer = window.setInterval(() => {
+      if (dataChannel.readyState === 'open') {
+        dataChannel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+      }
+    }, 5000)
+  })
 
   const offer = await peer.createOffer()
   await peer.setLocalDescription(offer)
@@ -120,6 +129,7 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
   return {
     close() {
       for (const timer of finalizeTimers.values()) window.clearTimeout(timer)
+      if (commitTimer !== null) window.clearInterval(commitTimer)
       dataChannel.close()
       peer.close()
     },
