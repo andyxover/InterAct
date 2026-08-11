@@ -1,4 +1,4 @@
-import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
+import { callAiJson, corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 type ParticipantRecord = { id: string; name: string }
@@ -7,6 +7,29 @@ const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_f
 const speakerLanguages = new Set(['zh-tw', 'en'])
 const captionDisplayLanguages = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
 const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
+const questionTranslationSchema = {
+  type: 'object',
+  additionalProperties: false,
+  properties: {
+    title: { type: 'string' },
+    prompt_text: { type: 'string' },
+    options: { type: 'array', items: { type: 'string' } },
+  },
+  required: ['title', 'prompt_text', 'options'],
+}
+
+async function translateQuestion(title: string, promptText: string, options: string[]) {
+  if (!promptText && !options.length) return {}
+  const result = await callAiJson(
+    'Translate this instructor-authored classroom question into concise, natural English. Preserve names, numbers, formulas, meaning, option order, and the number of options exactly. Do not answer, explain, summarize, or add content. Return only the requested JSON.',
+    { title, prompt_text: promptText, options },
+    questionTranslationSchema,
+  )
+  if (result.status !== 'success') return {}
+  const translated = result.output as { title?: string; prompt_text?: string; options?: string[] }
+  if (!Array.isArray(translated.options) || translated.options.length !== options.length) return {}
+  return { en: translated }
+}
 
 function randomIndex(length: number) {
   if (length <= 1) return 0
@@ -258,6 +281,12 @@ Deno.serve(async (req) => {
         pronunciation: '朗讀發音',
         oral_response: '口語表達',
       }
+      let translations = {}
+      try {
+        translations = await translateQuestion(titles[type], promptText, options)
+      } catch (translationError) {
+        console.error('question translation failed', translationError instanceof Error ? translationError.message : translationError)
+      }
       const { data: objectList, error: objectError } = await supabase.storage
         .from('interact-screenshots')
         .list(`sessions/${sessionId}/screenshots`, { search: `${screenshotId}.`, limit: 2 })
@@ -296,6 +325,7 @@ Deno.serve(async (req) => {
           title: titles[type],
           prompt_text: promptText || null,
           options,
+          translations,
           allow_multiple: allowMultiple,
         })
         .select('*')

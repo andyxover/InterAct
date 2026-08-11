@@ -10,6 +10,7 @@ import { LotteryOverlay } from '../components/LotteryOverlay'
 import { SharedContentPanel } from '../components/SharedContentPanel'
 import { SetupNotice } from '../components/SetupNotice'
 import { StudentSocialLinks } from '../components/StudentSocialLinks'
+import { ParticipantLanguageSwitcher } from '../components/ParticipantLanguageSwitcher'
 import { isBuzzerAccepting } from '../lib/buzzer'
 import {
   MESSAGE_MAX_CJK_CHARACTERS,
@@ -20,6 +21,8 @@ import {
 } from '../lib/messageLimit'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
+import { participantLocaleFromStorage, participantText } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
 
 export function ParticipantPage() {
@@ -42,8 +45,15 @@ export function ParticipantPage() {
   const [exitTicketBusy, setExitTicketBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
   const navigate = useNavigate()
   useSessionPresence(sessionId, session?.status === 'active' ? participant : null)
+  const localizedSummary = locale === 'en' ? sessionSummary?.translations?.en || sessionSummary : sessionSummary
+
+  function changeLocale(nextLocale: ParticipantLocale) {
+    localStorage.setItem('interact_participant_locale', nextLocale)
+    setLocale(nextLocale)
+  }
 
   const loadAll = useCallback(async () => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
@@ -318,50 +328,51 @@ export function ParticipantPage() {
   if (session?.status === 'ended') {
     return (
       <main className="participant-page participant-ended-page">
+        <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
         <SetupNotice />
         <StudentSocialLinks />
         <section className="participant-ended-hero">
           <span className="participant-ended-icon"><PartyPopper size={34} /></span>
-          <p className="eyebrow">課程已結束</p>
-          <h1>下課啦！</h1>
-          <p>{participant?.name ? `${participant.name}，謝謝你的參與。` : '謝謝你的參與。'}</p>
+          <p className="eyebrow">{participantText(locale, 'courseEnded')}</p>
+          <h1>{participantText(locale, 'classDismissed')}</h1>
+          <p>{participant?.name ? `${participant.name}${locale === 'en' ? ', ' : '，'}${participantText(locale, 'thankYou')}` : participantText(locale, 'thankYou')}</p>
         </section>
         {sessionSummary && (
           <section className="panel participant-summary-panel" aria-live="polite">
             <div className="participant-summary-heading">
               <span className="heading-icon"><Sparkles size={18} /></span>
               <div>
-                <p className="eyebrow">AI 課程總結</p>
-                <h2>今天的課程重點</h2>
+                <p className="eyebrow">{participantText(locale, 'aiSummary')}</p>
+                <h2>{participantText(locale, 'todayHighlights')}</h2>
               </div>
             </div>
             <div className="participant-summary-content">
-              {sessionSummary.lesson_key_points?.length > 0 && (
+              {localizedSummary && localizedSummary.lesson_key_points.length > 0 && (
                 <div className="participant-summary-section">
-                  <h3><BookOpen size={18} />課堂重點整理</h3>
+                  <h3><BookOpen size={18} />{participantText(locale, 'lessonKeyPoints')}</h3>
                   <ul>
-                    {sessionSummary.lesson_key_points.map((item) => <li key={item}>{item}</li>)}
+                    {localizedSummary.lesson_key_points.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
               )}
-              <p className="participant-summary-lead">{sessionSummary.executive_summary}</p>
+              <p className="participant-summary-lead">{localizedSummary?.executive_summary}</p>
               <div className="participant-summary-section">
-                <h3><BookOpen size={18} />學習整理</h3>
-                <p>{sessionSummary.learning_analysis.overall_understanding}</p>
+                <h3><BookOpen size={18} />{participantText(locale, 'learningReview')}</h3>
+                <p>{localizedSummary?.learning_analysis.overall_understanding}</p>
               </div>
-              {sessionSummary.learning_analysis.strengths.length > 0 && (
+              {localizedSummary && localizedSummary.learning_analysis.strengths.length > 0 && (
                 <div className="participant-summary-section">
-                  <h3>本次掌握的重點</h3>
+                  <h3>{participantText(locale, 'strengths')}</h3>
                   <ul>
-                    {sessionSummary.learning_analysis.strengths.map((item) => <li key={item}>{item}</li>)}
+                    {localizedSummary.learning_analysis.strengths.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
               )}
-              {sessionSummary.learning_analysis.misconceptions.length > 0 && (
+              {localizedSummary && localizedSummary.learning_analysis.misconceptions.length > 0 && (
                 <div className="participant-summary-section">
-                  <h3>可以再複習</h3>
+                  <h3>{participantText(locale, 'reviewMore')}</h3>
                   <ul>
-                    {sessionSummary.learning_analysis.misconceptions.map((item) => <li key={item}>{item}</li>)}
+                    {localizedSummary.learning_analysis.misconceptions.map((item) => <li key={item}>{item}</li>)}
                   </ul>
                 </div>
               )}
@@ -373,7 +384,8 @@ export function ParticipantPage() {
             <SharedContentPanel
               contents={sharedContents}
               defaultExpanded
-              heading="課堂文字與連結"
+              heading={participantText(locale, 'sharedResources')}
+              locale={locale}
             />
           </section>
         )}
@@ -383,11 +395,12 @@ export function ParticipantPage() {
 
   return (
     <main className="participant-page">
+      <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
       <SetupNotice />
       <StudentSocialLinks />
       <header className="participant-header">
         <h1>
-          <strong>{participant?.name || '與會者'}</strong>，歡迎加入{session?.title || 'InterAct 場次'}
+          <strong>{participant?.name || participantText(locale, 'attendee')}</strong>{locale === 'en' ? participantText(locale, 'welcome') : `，${participantText(locale, 'welcome')}`}{session?.title || participantText(locale, 'session')}
         </h1>
       </header>
       {session && (
@@ -395,6 +408,7 @@ export function ParticipantPage() {
           enabled={session.interpretation_enabled && session.interpretation_audio_enabled}
           languages={session.interpretation_languages}
           sessionId={sessionId}
+          locale={locale}
         />
       )}
       {session?.exit_ticket_prompt && session.exit_ticket_category && (
@@ -402,25 +416,27 @@ export function ParticipantPage() {
           <ExitTicketForm
             busy={exitTicketBusy}
             category={session.exit_ticket_category}
-            prompt={session.exit_ticket_prompt}
+            prompt={locale === 'en' ? session.exit_ticket_prompt_en || session.exit_ticket_prompt : session.exit_ticket_prompt}
             ticket={exitTicket}
+            locale={locale}
             onSubmit={submitExitTicket}
           />
         </div>
       )}
-      <SharedContentPanel contents={sharedContents} />
-      {screenshot && <img alt="講者派送圖片" className="participant-image" src={screenshot.public_url} />}
+      <SharedContentPanel contents={sharedContents} locale={locale} />
+      {screenshot && <img alt={participantText(locale, 'imageAlt')} className="participant-image" src={screenshot.public_url} />}
       <ParticipantQuestionView
         answer={answer}
         audioBusy={audioBusy}
         audioResponse={audioResponse}
         question={question}
+        locale={locale}
         onSubmit={submitAnswer}
         onSubmitAudio={submitAudio}
       />
       <form className="panel message-form" onSubmit={sendMessage}>
         <label>
-          送出問題或回饋
+          {participantText(locale, 'sendFeedback')}
           <textarea
             value={message}
             maxLength={MESSAGE_MAX_RAW_CHARACTERS}
@@ -428,15 +444,15 @@ export function ParticipantPage() {
               setMessage(event.target.value)
               if (error) setError('')
             }}
-            placeholder="送出後會即時出現在講者畫面，上限36個中文字或24個英文單字"
+            placeholder={participantText(locale, 'messagePlaceholder')}
           />
         </label>
         <p className={`message-limit${message && !messageFitsLimit(message) ? ' over-limit' : ''}`}>
-          上限 {MESSAGE_MAX_CJK_CHARACTERS} 個中文字或 {MESSAGE_MAX_ENGLISH_WORDS} 個英文單字
-          {message && ` · 目前使用 ${Math.ceil(messageUsage(message).units)}/${MESSAGE_MAX_CJK_CHARACTERS}`}
+          {participantText(locale, 'limit')}
+          {message && ` · ${participantText(locale, 'used')} ${Math.ceil(messageUsage(message).units)}/${MESSAGE_MAX_CJK_CHARACTERS}`}
         </p>
         {error && <p className="error">{error}</p>}
-        <button disabled={!message.trim() || !messageFitsLimit(message)} type="submit"><Send size={18} />送出</button>
+        <button disabled={!message.trim() || !messageFitsLimit(message)} type="submit"><Send size={18} />{participantText(locale, 'send')}</button>
       </form>
       <LotteryOverlay event={lotteryEvent} participantId={participant?.id} />
       <BuzzerOverlay

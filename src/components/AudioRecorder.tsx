@@ -2,12 +2,15 @@ import { CircleStop, Mic, RotateCcw } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { recordingToWav } from '../lib/audio'
 import type { AudioResponse, Question } from '../types'
+import { participantText } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 
 type Props = {
   busy: boolean
   question: Question
   response: AudioResponse | null
   onSubmit: (file: File, durationMs: number) => Promise<void>
+  locale?: ParticipantLocale
 }
 
 const MAX_DURATION_MS = 180_000
@@ -17,7 +20,7 @@ function formatDuration(milliseconds: number) {
   return `${Math.floor(seconds / 60)}:${String(seconds % 60).padStart(2, '0')}`
 }
 
-export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
+export function AudioRecorder({ busy, question, response, onSubmit, locale = 'zh-TW' }: Props) {
   const [recording, setRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [error, setError] = useState('')
@@ -102,35 +105,36 @@ export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
   }
 
   if (response) {
-    const analysis = response.analysis_json
+    const originalAnalysis = response.analysis_json
+    const analysis = locale === 'en' ? originalAnalysis?.translations?.en || originalAnalysis : originalAnalysis
     return (
       <div className="audio-response-card" aria-live="polite">
         {question.status === 'active' ? (
-          <p className="success">錄音已送出，AI 正在分析；停止作答後會顯示評測結果。</p>
+          <p className="success">{participantText(locale, 'recordingSent')}</p>
         ) : response.analysis_status === 'success' && analysis ? (
           <>
             <div className="audio-feedback-heading">
               <div>
-                <h3>你的個人評測</h3>
-                <p className="muted">辨識語言：{analysis.detected_language}</p>
+                <h3>{participantText(locale, 'personalAssessment')}</h3>
+                <p className="muted">{participantText(locale, 'detectedLanguage')}{analysis.detected_language}</p>
               </div>
-              <div className="audio-score"><strong>{analysis.score}</strong><span>分</span></div>
+              <div className="audio-score"><strong>{analysis.score}</strong><span>{participantText(locale, 'points')}</span></div>
             </div>
             <p className="audio-feedback-summary">{analysis.summary}</p>
             {response.signed_url && <audio controls preload="metadata" src={response.signed_url} />}
             <div className="audio-analysis-grid">
-              <div><strong>內容對照</strong><p>{analysis.relevance}</p></div>
-              <div><strong>表達清晰度</strong><p>{analysis.clarity}</p></div>
-              <div><strong>完成度</strong><p>{analysis.completeness}</p></div>
+              <div><strong>{participantText(locale, 'relevance')}</strong><p>{analysis.relevance}</p></div>
+              <div><strong>{participantText(locale, 'clarity')}</strong><p>{analysis.clarity}</p></div>
+              <div><strong>{participantText(locale, 'completeness')}</strong><p>{analysis.completeness}</p></div>
             </div>
-            <div className="audio-feedback-section"><strong>做得好的地方</strong><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></div>
-            <div className="audio-feedback-section"><strong>下一步建議</strong><ul>{analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul></div>
-            <details><summary>查看辨識內容</summary><p>{analysis.transcript || '未辨識到語音內容'}</p></details>
+            <div className="audio-feedback-section"><strong>{participantText(locale, 'doneWell')}</strong><ul>{analysis.strengths.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <div className="audio-feedback-section"><strong>{participantText(locale, 'nextStep')}</strong><ul>{analysis.improvements.map((item) => <li key={item}>{item}</li>)}</ul></div>
+            <details><summary>{participantText(locale, 'transcript')}</summary><p>{analysis.transcript || participantText(locale, 'noTranscript')}</p></details>
           </>
         ) : response.analysis_status === 'failed' ? (
-          <p className="error">錄音已收到，但 AI 評測未完成。請告知講師。</p>
+          <p className="error">{participantText(locale, 'assessmentFailed')}</p>
         ) : (
-          <p className="muted">AI 評測仍在處理中，請稍候。</p>
+          <p className="muted">{participantText(locale, 'assessmentPending')}</p>
         )}
       </div>
     )
@@ -138,7 +142,7 @@ export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
 
   return (
     <div className="audio-recorder">
-      <p className="muted">最長 3 分鐘。請在安靜處錄音，完成後按停止。</p>
+      <p className="muted">{participantText(locale, 'recordingHint')}</p>
       <button
         className={recording ? 'recording-button active' : 'recording-button'}
         disabled={busy}
@@ -146,7 +150,7 @@ export function AudioRecorder({ busy, question, response, onSubmit }: Props) {
         onClick={recording ? stopRecording : startRecording}
       >
         {recording ? <CircleStop size={28} /> : busy ? <RotateCcw className="spin" size={28} /> : <Mic size={28} />}
-        <span>{recording ? `停止錄音 ${formatDuration(elapsed)}` : busy ? '上傳並分析中...' : '開始錄音'}</span>
+        <span>{recording ? `${participantText(locale, 'stopRecording')} ${formatDuration(elapsed)}` : busy ? participantText(locale, 'uploading') : participantText(locale, 'startRecording')}</span>
       </button>
       {error && <p className="error">{error}</p>}
     </div>

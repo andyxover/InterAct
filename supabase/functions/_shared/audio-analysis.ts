@@ -1,6 +1,6 @@
 import { getAdminClient } from './supabase.ts'
 
-const audioAnalysisSchema = {
+const audioAnalysisCoreSchema = {
   type: 'object',
   additionalProperties: false,
   properties: {
@@ -20,6 +20,20 @@ const audioAnalysisSchema = {
     'mode', 'detected_language', 'transcript', 'score', 'summary', 'relevance',
     'clarity', 'completeness', 'strengths', 'improvements', 'limitations',
   ],
+}
+
+const audioAnalysisSchema = {
+  ...audioAnalysisCoreSchema,
+  properties: {
+    ...audioAnalysisCoreSchema.properties,
+    translations: {
+      type: 'object',
+      additionalProperties: false,
+      properties: { en: audioAnalysisCoreSchema },
+      required: ['en'],
+    },
+  },
+  required: [...audioAnalysisCoreSchema.required, 'translations'],
 }
 
 function bytesToBase64(bytes: Uint8Array) {
@@ -63,7 +77,7 @@ export async function analyzeAudioResponse(input: {
     body: JSON.stringify({
       systemInstruction: {
         parts: [{
-          text: `你是 InterAct 的口語學習評測助理。請使用繁體中文提供具體、尊重且可行的個別回饋。${modeInstruction} transcript 必須忠實轉寫學員實際說出的內容。score 為 0 到 100 的整體表現分數。若音質不足、語音太短或無法辨識，請保守評分並在 limitations 說明，不可捏造內容。`,
+          text: `你是 InterAct 的口語學習評測助理。請先使用繁體中文提供具體、尊重且可行的個別回饋，再於 translations.en 提供結構相同且忠實的英文翻譯；英文版不可另行評分或推論。${modeInstruction} transcript 必須忠實轉寫學員實際說出的內容。score 為 0 到 100 的整體表現分數。若音質不足、語音太短或無法辨識，請保守評分並在 limitations 說明，不可捏造內容。`,
         }],
       },
       contents: [{

@@ -2,6 +2,8 @@ import { Send, Star } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import type { ExitTicket, ExitTicketCategory } from '../types'
+import { participantText } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 
 type Props = {
   prompt: string
@@ -9,6 +11,7 @@ type Props = {
   ticket: ExitTicket | null
   busy: boolean
   onSubmit: (value: { responseText: string; rating: number }) => void
+  locale?: ParticipantLocale
 }
 
 const categoryLabels: Record<ExitTicketCategory, string> = {
@@ -18,7 +21,7 @@ const categoryLabels: Record<ExitTicketCategory, string> = {
   student_question: '提出疑問',
 }
 
-export function ExitTicketForm({ prompt, category, ticket, busy, onSubmit }: Props) {
+export function ExitTicketForm({ prompt, category, ticket, busy, onSubmit, locale = 'zh-TW' }: Props) {
   const [responseText, setResponseText] = useState('')
   const [rating, setRating] = useState(0)
 
@@ -36,24 +39,24 @@ export function ExitTicketForm({ prompt, category, ticket, busy, onSubmit }: Pro
     <section className="panel exit-ticket-panel">
       <div className="exit-ticket-heading">
         <h2>Exit Ticket</h2>
-        <span>{categoryLabels[category]}</span>
+        <span>{locale === 'en' ? ({ lesson_summary: 'Lesson summary', learning_assessment: 'Learning assessment', course_satisfaction: 'Class feedback', student_question: 'Student question' } as const)[category] : categoryLabels[category]}</span>
       </div>
       {ticket ? (
         <div className="exit-ticket-submitted">
-          <p className="success">Exit Ticket 已送出</p>
-          <p><strong>學習程度：</strong>{ticket.rating} 顆星</p>
+          <p className="success">{participantText(locale, 'exitSubmitted')}</p>
+          <p><strong>{participantText(locale, 'learningLevel')}</strong>{ticket.rating} {participantText(locale, 'stars')}</p>
           <p><strong>{prompt}</strong></p>
           <p>{ticket.response_text}</p>
         </div>
       ) : (
         <form className="exit-ticket-form" onSubmit={submit}>
           <fieldset className="exit-ticket-question">
-            <legend><span>必答 1</span>請用 1 到 5 顆星評估你今天的學習理解程度</legend>
-            <div className="star-rating" role="radiogroup" aria-label="學習程度星等">
+            <legend><span>{participantText(locale, 'required')}</span>{participantText(locale, 'ratingPrompt')}</legend>
+            <div className="star-rating" role="radiogroup" aria-label={participantText(locale, 'ratingLabel')}>
               {[1, 2, 3, 4, 5].map((value) => (
               <button
                 aria-checked={rating === value}
-                aria-label={`${value} 顆星`}
+                aria-label={`${value} ${participantText(locale, 'stars')}`}
                 className={value <= rating ? 'selected' : ''}
                 key={value}
                 role="radio"
@@ -66,17 +69,17 @@ export function ExitTicketForm({ prompt, category, ticket, busy, onSubmit }: Pro
             </div>
           </fieldset>
           <label className="exit-ticket-question">
-            <span className="exit-ticket-question-title"><b>選填 2</b>{prompt}</span>
+            <span className="exit-ticket-question-title"><b>{participantText(locale, 'optional')}</b>{prompt}</span>
             <textarea
               maxLength={2000}
               value={responseText}
-              placeholder="選填：可輸入你的回答、建議或回饋"
+              placeholder={participantText(locale, 'optionalPlaceholder')}
               onChange={(event) => setResponseText(event.target.value)}
             />
           </label>
           <button disabled={busy || !rating} type="submit">
             {!busy && <Send size={18} />}
-            {busy ? '送出中...' : '送出 Exit Ticket'}
+            {busy ? participantText(locale, 'sending') : participantText(locale, 'submitExit')}
           </button>
         </form>
       )}

@@ -947,6 +947,58 @@ h2 {
   max-width: 100%;
   overflow-wrap: anywhere;
   text-align: center;
+  white-space: normal;
+}
+
+.participant-language-switcher {
+  bottom: max(18px, env(safe-area-inset-bottom));
+  display: grid;
+  gap: 8px;
+  justify-items: end;
+  position: fixed;
+  right: max(18px, env(safe-area-inset-right));
+  z-index: 60;
+}
+
+.participant-language-button {
+  align-items: center;
+  background: var(--surface-strong);
+  border: 1px solid rgb(255 255 255 / 18%);
+  border-radius: 999px;
+  box-shadow: var(--shadow-lg);
+  color: #fff;
+  display: inline-flex;
+  gap: 7px;
+  min-height: 48px;
+  padding: 10px 14px;
+}
+
+.participant-language-menu {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  box-shadow: var(--shadow-lg);
+  display: grid;
+  min-width: 170px;
+  overflow: hidden;
+  padding: 6px;
+}
+
+.participant-language-menu button {
+  align-items: center;
+  background: transparent;
+  border: 0;
+  color: var(--text);
+  display: flex;
+  justify-content: space-between;
+  padding: 10px 12px;
+  text-align: left;
+}
+
+.participant-language-menu button:hover,
+.participant-language-menu button[aria-checked="true"] {
+  background: var(--primary-soft);
+  color: var(--primary-dark);
 }
 
 .desktop-overlay-root .live-caption-overlay {
