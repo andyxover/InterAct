@@ -8,6 +8,7 @@ export type Session = {
   current_question_id: string | null
   short_join_url: string | null
   exit_ticket_prompt: string | null
+  exit_ticket_prompt_en: string | null
   exit_ticket_category: ExitTicketCategory | null
   exit_ticket_response_type: ExitTicketResponseType | null
   recording_enabled: boolean
@@ -132,6 +133,13 @@ export type Question = {
   title: string
   prompt_text: string | null
   options: string[]
+  translations: {
+    en?: {
+      title?: string
+      prompt_text?: string | null
+      options?: string[]
+    }
+  }
   allow_multiple: boolean
   correct_answer: string | null
   correct_answers: string[]
@@ -165,6 +173,7 @@ export type AudioAnalysis = {
   strengths: string[]
   improvements: string[]
   limitations: string[]
+  translations?: { en?: Omit<AudioAnalysis, 'translations'> }
 }
 
 export type AudioResponse = {
@@ -255,6 +264,7 @@ export type SessionAnalysis = {
     follow_up_questions: string[]
   }
   limitations: string[]
+  translations?: { en?: Omit<SessionAnalysis, 'translations'> }
 }
 
 export type AiSummary = {

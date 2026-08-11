@@ -41,6 +41,9 @@ function readableServiceError(detail: string) {
   if (detail.includes('no credits remaining') || detail.includes('credit_balance_exhausted')) {
     return 'OpenAI API 額度已用完；ChatGPT 訂閱不包含 API 點數，請確認儲值的是這支 API key 所屬的 Organization。'
   }
+  if (detail.includes('<!DOCTYPE html') || detail.includes('<html')) {
+    return 'OpenAI 即時字幕服務暫時無法連線。'
+  }
   try {
     const parsed = JSON.parse(detail)
     const message = parsed?.error?.message
@@ -48,6 +51,11 @@ function readableServiceError(detail: string) {
   } catch {
     return detail
   }
+}
+
+async function directRealtimeError(response: Response) {
+  const detail = await response.text()
+  return readableServiceError(detail)
 }
 
 async function functionErrorMessage(error: unknown) {
@@ -69,6 +77,7 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
   const peer = new RTCPeerConnection()
   const dataChannel = peer.createDataChannel('oai-events')
   const translatedAudioElements: HTMLAudioElement[] = []
+  let stopLocalTurnDetection = () => {}
   let closed = false
   for (const track of options.stream.getAudioTracks()) peer.addTrack(track, options.stream)
   if (options.mode === 'translation' && options.onTranslatedAudio) {
@@ -156,15 +165,73 @@ export async function createRealtimeCaptionConnection(options: ConnectionOptions
     peer.close()
     throw new Error(await functionErrorMessage(error))
   }
-  if (!data?.sdp) {
-    peer.close()
-    throw new Error(data?.message || '沒有取得即時字幕連線。')
+  if (options.mode === 'transcription' && data?.clientSecret) {
+    const response = await fetch('https://api.openai.com/v1/realtime/calls', {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${data.clientSecret}`,
+        'Content-Type': 'application/sdp',
+      },
+      body: offer.sdp,
+      signal: AbortSignal.timeout(15_000),
+    })
+    if (!response.ok) {
+      const message = await directRealtimeError(response)
+      peer.close()
+      throw new Error(message)
+    }
+    const answerSdp = await response.text()
+    await peer.setRemoteDescription({ type: 'answer', sdp: answerSdp })
+
+    try {
+      const audioContext = new AudioContext()
+      const source = audioContext.createMediaStreamSource(options.stream)
+      const analyser = audioContext.createAnalyser()
+      analyser.fftSize = 2048
+      source.connect(analyser)
+      const samples = new Float32Array(analyser.fftSize)
+      let speechDetected = false
+      let speechStartedAt = 0
+      let lastSpeechAt = 0
+      const detector = window.setInterval(() => {
+        analyser.getFloatTimeDomainData(samples)
+        let energy = 0
+        for (const sample of samples) energy += sample * sample
+        const now = performance.now()
+        if (Math.sqrt(energy / samples.length) >= 0.012) {
+          if (!speechDetected) speechStartedAt = now
+          speechDetected = true
+          lastSpeechAt = now
+        }
+        const paused = speechDetected && now - lastSpeechAt >= 550
+        const longSegment = speechDetected && now - speechStartedAt >= 6000
+        if ((paused || longSegment) && dataChannel.readyState === 'open') {
+          dataChannel.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+          speechDetected = false
+        }
+      }, 100)
+      void audioContext.resume().catch(() => {})
+      stopLocalTurnDetection = () => {
+        window.clearInterval(detector)
+        source.disconnect()
+        analyser.disconnect()
+        void audioContext.close()
+      }
+    } catch {
+      // The realtime delta stream still works if local audio analysis is unavailable.
+    }
+  } else {
+    if (!data?.sdp) {
+      peer.close()
+      throw new Error(data?.message || '沒有取得即時字幕連線。')
+    }
+    await peer.setRemoteDescription({ type: 'answer', sdp: data.sdp })
   }
-  await peer.setRemoteDescription({ type: 'answer', sdp: data.sdp })
 
   return {
     close() {
       closed = true
+      stopLocalTurnDetection()
       for (const timer of finalizeTimers.values()) window.clearTimeout(timer)
       for (const audio of translatedAudioElements) {
         audio.pause()

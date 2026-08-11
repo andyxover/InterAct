@@ -2,11 +2,14 @@ import { Headphones, Pause, Play, Volume2 } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { captionLanguageLabel } from '../lib/captionLanguages'
 import { requireSupabase } from '../lib/supabase'
+import { participantText } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 
 type Props = {
   enabled: boolean
   languages: string[]
   sessionId: string
+  locale?: ParticipantLocale
 }
 
 type AudioPacket = {
@@ -84,7 +87,7 @@ function pcm16AudioBuffer(context: AudioContext, packet: AudioPacket) {
   return { buffer, rms: sampleCount ? Math.sqrt(squareSum / sampleCount) : 0 }
 }
 
-export function ParticipantInterpretationAudio({ enabled, languages, sessionId }: Props) {
+export function ParticipantInterpretationAudio({ enabled, languages, sessionId, locale = 'zh-TW' }: Props) {
   const [language, setLanguage] = useState(() => localStorage.getItem(`interact_interpretation_language_${sessionId}`) || languages[0] || '')
   const [listening, setListening] = useState(false)
   const [status, setStatus] = useState('')
@@ -112,7 +115,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
       outputGainRef.current = outputGain
     }
     nextPlaybackAtRef.current = context.currentTime
-    setStatus('正在連接教師端口譯...')
+    setStatus(participantText(locale, 'connecting'))
 
     const channel = supabase
       .channel(`interpretation-audio:${sessionId}:${language}`)
@@ -126,7 +129,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           if (context.state !== 'running') await context.resume()
           if (context.state !== 'running') throw new Error('AudioContext is suspended')
           if (rms < 0.0005) {
-            setStatus('已連線，等待教師說話...')
+            setStatus(participantText(locale, 'waitingTeacher'))
             return
           }
           const source = context.createBufferSource()
@@ -137,19 +140,19 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
           const startsAt = Math.max(context.currentTime + 0.04, nextPlaybackAtRef.current)
           source.start(startsAt)
           nextPlaybackAtRef.current = startsAt + buffer.duration
-          setStatus('口譯播放中')
-        }).catch(() => setStatus('音訊輸出未啟用；請點右上角喇叭後重新開始聆聽。'))
+          setStatus(participantText(locale, 'playing'))
+        }).catch(() => setStatus(participantText(locale, 'audioNotEnabled')))
       })
       .subscribe((nextStatus) => {
-        if (nextStatus === 'SUBSCRIBED') setStatus('已連線，等待教師說話...')
-        if (nextStatus === 'CHANNEL_ERROR' || nextStatus === 'TIMED_OUT') setStatus('口譯連線失敗，請重試。')
+        if (nextStatus === 'SUBSCRIBED') setStatus(participantText(locale, 'waitingTeacher'))
+        if (nextStatus === 'CHANNEL_ERROR' || nextStatus === 'TIMED_OUT') setStatus(participantText(locale, 'connectionFailed'))
       })
 
     return () => {
       void supabase.removeChannel(channel)
       nextPlaybackAtRef.current = 0
     }
-  }, [enabled, language, listening, sessionId])
+  }, [enabled, language, listening, locale, sessionId])
 
   useEffect(() => () => {
     void audioContextRef.current?.close()
@@ -192,7 +195,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
     gain.connect(outputGain)
     oscillator.start()
     oscillator.stop(context.currentTime + 0.3)
-    setStatus('已播放測試音；若沒有聽見，請檢查裝置音量與耳機輸出。')
+    setStatus(participantText(locale, 'testPlayed'))
   }
 
   if (!enabled || !languages.length) return null
@@ -200,11 +203,11 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
   return (
     <section className="panel participant-interpretation-audio">
       <div className="participant-interpretation-heading">
-        <span><Headphones size={19} />即時語音口譯</span>
+        <span><Headphones size={19} />{participantText(locale, 'interpretation')}</span>
         <button
-          aria-label="測試耳機"
+          aria-label={participantText(locale, 'testHeadphones')}
           className={`interpretation-speaker-test${listening ? ' is-listening' : ''}`}
-          title="測試耳機"
+          title={participantText(locale, 'testHeadphones')}
           type="button"
           onClick={() => void testHeadphones()}
         >
@@ -212,7 +215,7 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
         </button>
       </div>
       <label>
-        耳機語言
+        {participantText(locale, 'headphoneLanguage')}
         {languages.length > 2 ? (
           <select disabled={listening} value={language} onChange={(event) => {
             setLanguage(event.target.value)
@@ -241,9 +244,9 @@ export function ParticipantInterpretationAudio({ enabled, languages, sessionId }
         )}
       </label>
       <button className={listening ? 'ghost-button' : ''} type="button" onClick={() => void toggleListening()}>
-        {listening ? <><Pause size={17} />停止聆聽</> : <><Play size={17} />開始聆聽口譯</>}
+        {listening ? <><Pause size={17} />{participantText(locale, 'stopListening')}</> : <><Play size={17} />{participantText(locale, 'startListening')}</>}
       </button>
-      <p className="muted">{status || '建議戴上耳機，選擇語言後開始聆聽。'}</p>
+      <p className="muted">{status || participantText(locale, 'headphoneHint')}</p>
     </section>
   )
 }

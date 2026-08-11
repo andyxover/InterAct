@@ -1,6 +1,8 @@
 import { Check, ChevronDown, ChevronUp, Clock3, Copy, ExternalLink, Send } from 'lucide-react'
 import { useEffect, useState } from 'react'
 import type { SharedContent } from '../types'
+import { participantText } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 
 const timeFormatter = new Intl.DateTimeFormat('zh-TW', {
   month: 'numeric',
@@ -14,9 +16,10 @@ type Props = {
   contents: SharedContent[]
   defaultExpanded?: boolean
   heading?: string
+  locale?: ParticipantLocale
 }
 
-export function SharedContentPanel({ contents, defaultExpanded = false, heading = '講者派送' }: Props) {
+export function SharedContentPanel({ contents, defaultExpanded = false, heading, locale = 'zh-TW' }: Props) {
   const [copiedId, setCopiedId] = useState<string | null>(null)
   const [expanded, setExpanded] = useState(defaultExpanded)
   const latestContentId = contents[0]?.id
@@ -38,7 +41,7 @@ export function SharedContentPanel({ contents, defaultExpanded = false, heading 
   return (
     <section className="shared-content-section" aria-live="polite">
       <div className="shared-content-heading">
-        <div><Send size={18} /><h2>{heading}</h2></div>
+        <div><Send size={18} /><h2>{heading || participantText(locale, 'presenterDispatch')}</h2></div>
         {contents.length >= 2 && (
           <button
             aria-expanded={expanded}
@@ -47,7 +50,7 @@ export function SharedContentPanel({ contents, defaultExpanded = false, heading 
             onClick={() => setExpanded((current) => !current)}
           >
             {expanded ? <ChevronUp size={17} /> : <ChevronDown size={17} />}
-            {expanded ? '收合舊內容' : `展開全部 ${contents.length} 則`}
+            {expanded ? participantText(locale, 'collapse') : `${participantText(locale, 'expandAll')} ${contents.length} ${participantText(locale, 'items')}`}
           </button>
         )}
       </div>
@@ -59,16 +62,16 @@ export function SharedContentPanel({ contents, defaultExpanded = false, heading 
               {content.body && (
                 <button className="ghost-button" type="button" onClick={() => copyText(content)}>
                   {copiedId === content.id ? <Check size={17} /> : <Copy size={17} />}
-                  {copiedId === content.id ? '已複製' : '複製文字'}
+                  {copiedId === content.id ? participantText(locale, 'copied') : participantText(locale, 'copy')}
                 </button>
               )}
               {content.url && (
                 <a className="primary-link" href={content.url} rel="noopener noreferrer" target="_blank">
-                  <ExternalLink size={17} />開啟網址
+                  <ExternalLink size={17} />{participantText(locale, 'openLink')}
                 </a>
               )}
               <time className="shared-content-time" dateTime={content.created_at} title={new Date(content.created_at).toLocaleString('zh-TW')}>
-                <Clock3 size={14} />派送 {timeFormatter.format(new Date(content.created_at))}
+                <Clock3 size={14} />{participantText(locale, 'dispatched')} {timeFormatter.format(new Date(content.created_at))}
               </time>
             </div>
           </article>

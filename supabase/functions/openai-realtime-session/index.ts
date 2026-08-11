@@ -14,7 +14,7 @@ Deno.serve(async (req) => {
     const mode = input.mode === 'translation' ? 'translation' : 'transcription'
     const targetLanguage = typeof input.targetLanguage === 'string' ? input.targetLanguage : ''
     const sdp = typeof input.sdp === 'string' ? input.sdp : ''
-    if (!sessionId || !presenterToken || !sdp) return jsonResponse({ message: '缺少講師字幕權限資料。' }, 400)
+    if (!sessionId || !presenterToken || (mode === 'translation' && !sdp)) return jsonResponse({ message: '缺少講師字幕權限資料。' }, 400)
 
     const supabase = getAdminClient()
     const tokenHash = await hashPresenterToken(presenterToken)
@@ -27,7 +27,6 @@ Deno.serve(async (req) => {
     if (!session.recording_enabled) return jsonResponse({ message: '課程錄製尚未開啟。' }, 409)
 
     const sourceLanguage = supportedLanguages.has(session.caption_source_language) ? session.caption_source_language : 'zh-tw'
-    const transcriptionLanguage = sourceLanguage.startsWith('zh-') ? 'zh' : sourceLanguage
     if (mode === 'translation' && (
       !supportedLanguages.has(targetLanguage) ||
       (
@@ -39,9 +38,6 @@ Deno.serve(async (req) => {
     const apiKey = Deno.env.get('OPENAI_API_KEY')
     if (!apiKey) return jsonResponse({ message: '尚未在 Supabase 設定 OPENAI_API_KEY。' }, 503)
 
-    const endpoint = mode === 'translation'
-      ? 'https://api.openai.com/v1/realtime/translations/calls'
-      : 'https://api.openai.com/v1/realtime/calls'
     const sessionConfig = mode === 'translation'
       ? {
           model: 'gpt-realtime-translate',
@@ -53,33 +49,88 @@ Deno.serve(async (req) => {
           type: 'transcription',
           audio: {
             input: {
-              transcription: { model: 'gpt-4o-mini-transcribe', language: transcriptionLanguage },
-              turn_detection: {
-                type: 'server_vad',
-                threshold: 0.5,
-                prefix_padding_ms: 300,
-                silence_duration_ms: 500,
+              transcription: {
+                model: 'gpt-realtime-whisper',
+                language: sourceLanguage,
+                delay: 'minimal',
               },
+              turn_detection: null,
             },
           },
         }
 
-    const formData = new FormData()
-    formData.set('sdp', sdp)
-    formData.set('session', JSON.stringify(sessionConfig))
+    if (mode === 'transcription') {
+      const response = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'OpenAI-Safety-Identifier': `interact_${tokenHash.slice(0, 48)}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          expires_after: { anchor: 'created_at', seconds: 60 },
+          session: sessionConfig,
+        }),
+        signal: AbortSignal.timeout(10_000),
+      })
+      const responseText = await response.text()
+      if (!response.ok) {
+        console.error('OpenAI realtime client secret failed', response.status, responseText.slice(0, 1000))
+        let detail = ''
+        try {
+          const body = JSON.parse(responseText)
+          detail = typeof body?.error?.message === 'string' ? body.error.message : ''
+        } catch {
+          detail = ''
+        }
+        return jsonResponse({ message: '無法建立即時字幕連線。', ...(detail ? { detail } : {}) }, response.status)
+      }
+      const secret = JSON.parse(responseText)
+      if (typeof secret?.value !== 'string' || !secret.value) {
+        return jsonResponse({ message: 'OpenAI 未回傳可用的即時字幕權杖。' }, 502)
+      }
+      return jsonResponse({
+        clientSecret: secret.value,
+        mode,
+        sourceLanguage,
+        targetLanguage: sourceLanguage,
+      })
+    }
 
-    const response = await fetch(endpoint, {
-      method: 'POST',
-      headers: {
-        Authorization: `Bearer ${apiKey}`,
-        'OpenAI-Safety-Identifier': `interact_${tokenHash.slice(0, 48)}`,
-      },
-      body: formData,
-    })
+    let response: Response | null = null
+    for (let attempt = 0; attempt < 2; attempt += 1) {
+      const formData = new FormData()
+      formData.set('sdp', sdp)
+      formData.set('session', JSON.stringify(sessionConfig))
+      response = await fetch('https://api.openai.com/v1/realtime/translations/calls', {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          'OpenAI-Safety-Identifier': `interact_${tokenHash.slice(0, 48)}`,
+        },
+        body: formData,
+      })
+      if (![502, 503, 504].includes(response.status) || attempt === 1) break
+      await new Promise((resolve) => setTimeout(resolve, 300))
+    }
+    if (!response) return jsonResponse({ message: '無法建立即時字幕連線。' }, 503)
     const answerSdp = await response.text()
     if (!response.ok) {
       console.error('OpenAI realtime call failed', response.status, answerSdp.slice(0, 1000))
-      return jsonResponse({ message: '無法建立即時字幕連線。', detail: answerSdp.slice(0, 1000) }, response.status)
+      const contentType = response.headers.get('content-type') || ''
+      let detail = ''
+      if (contentType.includes('application/json')) {
+        try {
+          const body = JSON.parse(answerSdp)
+          detail = typeof body?.error?.message === 'string' ? body.error.message : ''
+        } catch {
+          detail = ''
+        }
+      }
+      const message = [502, 503, 504].includes(response.status)
+        ? 'OpenAI 即時字幕服務暫時逾時，請重新開啟課程錄製。'
+        : '無法建立即時字幕連線。'
+      return jsonResponse({ message, ...(detail ? { detail } : {}) }, response.status)
     }
 
     return jsonResponse({ sdp: answerSdp, mode, sourceLanguage, targetLanguage: mode === 'translation' ? targetLanguage : sourceLanguage })

@@ -4,8 +4,11 @@ import { ArrowRight, UserRound } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { SetupNotice } from '../components/SetupNotice'
 import { StudentSocialLinks } from '../components/StudentSocialLinks'
+import { ParticipantLanguageSwitcher } from '../components/ParticipantLanguageSwitcher'
 import { getDeviceId } from '../lib/device'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
+import { participantLocaleFromStorage } from '../lib/participantI18n'
+import type { ParticipantLocale } from '../lib/participantI18n'
 import type { Participant, Session } from '../types'
 
 export function JoinPage() {
@@ -14,7 +17,13 @@ export function JoinPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
   const navigate = useNavigate()
+
+  function changeLocale(nextLocale: ParticipantLocale) {
+    localStorage.setItem('interact_participant_locale', nextLocale)
+    setLocale(nextLocale)
+  }
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionReference) return
@@ -32,15 +41,15 @@ export function JoinPage() {
     event.preventDefault()
     const trimmed = name.trim()
     if (!trimmed) {
-      setError('姓名必填。')
+      setError(locale === 'en' ? 'Name is required.' : '姓名必填。')
       return
     }
 
     setBusy(true)
     setError('')
     try {
-      if (!session) throw new Error('找不到這個場次。')
-      if (session.status !== 'active') throw new Error('這堂課已經結束，無法再加入。')
+      if (!session) throw new Error(locale === 'en' ? 'Session not found.' : '找不到這個場次。')
+      if (session.status !== 'active') throw new Error(locale === 'en' ? 'This class has ended and can no longer be joined.' : '這堂課已經結束，無法再加入。')
       const supabase = requireSupabase()
       const deviceId = getDeviceId()
       const { data, error: joinError } = await supabase.functions.invoke('participant-action', {
@@ -65,11 +74,12 @@ export function JoinPage() {
   if (session?.status === 'ended') {
     return (
       <main className="center-page">
+        <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
         <SetupNotice />
         <StudentSocialLinks />
         <section className="panel form-panel session-closed-card">
-          <h1>下課啦！</h1>
-          <p className="muted">這堂課已經結束，無法再加入或送出內容。</p>
+          <h1>{locale === 'en' ? 'Class ended' : '下課啦！'}</h1>
+          <p className="muted">{locale === 'en' ? 'This class has ended. You can no longer join or submit content.' : '這堂課已經結束，無法再加入或送出內容。'}</p>
         </section>
       </main>
     )
@@ -77,14 +87,15 @@ export function JoinPage() {
 
   return (
     <main className="center-page">
+      <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
       <SetupNotice />
       <StudentSocialLinks />
       <form autoComplete="off" className="panel form-panel" onSubmit={join}>
         <span className="form-heading-icon"><UserRound size={24} /></span>
-        <h1>加入{session?.title || '場次'}</h1>
-        <p className="muted">輸入姓名後即可進入互動課堂</p>
+        <h1>{locale === 'en' ? `Join ${session?.title || 'session'}` : `加入${session?.title || '場次'}`}</h1>
+        <p className="muted">{locale === 'en' ? 'Enter your name to join the interactive class' : '輸入姓名後即可進入互動課堂'}</p>
         <label>
-          你的姓名
+          {locale === 'en' ? 'Your name' : '你的姓名'}
           <input
             autoComplete="name"
             autoFocus
@@ -92,12 +103,12 @@ export function JoinPage() {
             name="participant-name"
             value={name}
             onChange={(event) => setName(event.target.value)}
-            placeholder="請輸入姓名"
+            placeholder={locale === 'en' ? 'Enter your name' : '請輸入姓名'}
           />
         </label>
         {error && <p className="error">{error}</p>}
         <button disabled={busy} type="submit">
-          {busy ? '加入中...' : '加入'}
+          {busy ? (locale === 'en' ? 'Joining...' : '加入中...') : (locale === 'en' ? 'Join' : '加入')}
           {!busy && <ArrowRight size={18} />}
         </button>
       </form>
