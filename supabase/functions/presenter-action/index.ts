@@ -185,7 +185,7 @@ Deno.serve(async (req) => {
         const interpretationLanguages: string[] = Array.isArray(input.interpretationLanguages)
           ? [...new Set((input.interpretationLanguages as unknown[]).filter((language: unknown): language is string => (
             typeof language === 'string' && interpretationLanguagesSupported.has(language) && language !== sourceLanguage
-          )))].slice(0, 3)
+          )))]
           : []
         const interpretationAudioEnabled = Boolean(input.interpretationAudioEnabled) && interpretationLanguages.length > 0
         values.caption_source_language = sourceLanguage
