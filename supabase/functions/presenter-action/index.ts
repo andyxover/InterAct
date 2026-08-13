@@ -395,19 +395,86 @@ Deno.serve(async (req) => {
         .eq('question_id', questionId).eq('session_id', sessionId).maybeSingle()
       if (quizError) throw quizError
       if (!quiz) return jsonResponse({ message: '找不到自訂測驗。' }, 404)
-      const [{ data: items, error: itemError }, { data: attempts, error: attemptError }] = await Promise.all([
+      const [{ data: items, error: itemError }, { data: attempts, error: attemptError }, { data: question, error: questionError }] = await Promise.all([
         supabase.from('quiz_items').select('*').eq('quiz_id', quiz.id).order('position'),
         supabase.from('quiz_attempts').select('*').eq('quiz_id', quiz.id).order('submitted_at'),
+        supabase.from('questions').select('screenshot_id').eq('id', questionId).eq('session_id', sessionId).single(),
       ])
-      if (itemError || attemptError) throw itemError || attemptError
+      if (itemError || attemptError || questionError) throw itemError || attemptError || questionError
       const itemIds = (items || []).map((item) => item.id)
       const attemptIds = (attempts || []).map((attempt) => attempt.id)
-      const [{ data: keys, error: keyError }, { data: answers, error: answerError }] = await Promise.all([
+      const [{ data: keys, error: keyError }, { data: answers, error: answerError }, { data: screenshot, error: screenshotError }] = await Promise.all([
         itemIds.length ? supabase.from('quiz_item_keys').select('*').in('item_id', itemIds) : Promise.resolve({ data: [], error: null }),
         attemptIds.length ? supabase.from('quiz_item_answers').select('*').in('attempt_id', attemptIds) : Promise.resolve({ data: [], error: null }),
+        question.screenshot_id
+          ? supabase.from('screenshots').select('*').eq('id', question.screenshot_id).maybeSingle()
+          : Promise.resolve({ data: null, error: null }),
       ])
-      if (keyError || answerError) throw keyError || answerError
-      return jsonResponse({ quiz, items: items || [], attempts: attempts || [], answers: answers || [], keys: keys || [] })
+      if (keyError || answerError || screenshotError) throw keyError || answerError || screenshotError
+      return jsonResponse({ quiz, items: items || [], attempts: attempts || [], answers: answers || [], keys: keys || [], screenshot: screenshot || null })
+    }
+
+    if (action === 'update_custom_quiz_key') {
+      const questionId = input.questionId
+      const itemId = input.itemId
+      const acceptedAnswers = normalizedOptions(input.acceptedAnswers).slice(0, 12)
+      if (!validUuid(questionId) || !validUuid(itemId) || !acceptedAnswers.length) {
+        return jsonResponse({ message: '請提供有效的題目與正確答案。' }, 400)
+      }
+      const { data: quiz, error: quizError } = await supabase.from('quizzes').select('id')
+        .eq('question_id', questionId).eq('session_id', sessionId).maybeSingle()
+      if (quizError) throw quizError
+      if (!quiz) return jsonResponse({ message: '找不到自訂測驗。' }, 404)
+      const { data: item, error: itemError } = await supabase.from('quiz_items').select('*')
+        .eq('id', itemId).eq('quiz_id', quiz.id).maybeSingle()
+      if (itemError) throw itemError
+      if (!item) return jsonResponse({ message: '找不到測驗題目。' }, 404)
+      if (item.type === 'multiple_choice' && (acceptedAnswers.length !== 1 || !item.options.includes(acceptedAnswers[0]))) {
+        return jsonResponse({ message: '正確答案必須是題目中的一個選項。' }, 400)
+      }
+      const { error: keyError } = await supabase.from('quiz_item_keys')
+        .update({ accepted_answers: acceptedAnswers }).eq('item_id', itemId)
+      if (keyError) throw keyError
+
+      if (item.type === 'multiple_choice') {
+        const [{ data: itemAnswers, error: answerError }, { data: quizItems, error: quizItemsError }] = await Promise.all([
+          supabase.from('quiz_item_answers').select('id, attempt_id, answer_values').eq('item_id', itemId),
+          supabase.from('quiz_items').select('type').eq('quiz_id', quiz.id),
+        ])
+        if (answerError || quizItemsError) throw answerError || quizItemsError
+        const isChoiceOnlyQuiz = Boolean(quizItems?.length) && quizItems.every((quizItem) => quizItem.type === 'multiple_choice')
+        const affectedAttemptIds = new Set<string>()
+        for (const answer of itemAnswers || []) {
+          const submitted = Array.isArray(answer.answer_values) ? [...new Set(answer.answer_values)].sort() : []
+          const expected = [...acceptedAnswers].sort()
+          const correct = submitted.length === expected.length && expected.every((value, index) => value === submitted[index])
+          const { error } = await supabase.from('quiz_item_answers').update({
+            score: correct ? item.points : 0,
+            feedback: {
+              zh_tw: correct ? '回答正確。' : `回答錯誤，正確答案：${expected.join('、')}`,
+              en: correct ? 'Correct.' : `Incorrect. Correct answer: ${expected.join(', ')}`,
+            },
+          }).eq('id', answer.id)
+          if (error) throw error
+          affectedAttemptIds.add(answer.attempt_id)
+        }
+        for (const attemptId of affectedAttemptIds) {
+          const { data: scoredAnswers, error: scoreError } = await supabase.from('quiz_item_answers')
+            .select('score').eq('attempt_id', attemptId)
+          if (scoreError) throw scoreError
+          const totalScore = Math.round((scoredAnswers || []).reduce((sum, answer) => sum + (Number(answer.score) || 0), 0) * 100) / 100
+          const values: Record<string, unknown> = { total_score: totalScore }
+          if (isChoiceOnlyQuiz) {
+            values.feedback = {
+              zh_tw: `本次選擇題得分 ${totalScore}/100。`,
+              en: `Multiple-choice score: ${totalScore}/100.`,
+            }
+          }
+          const { error } = await supabase.from('quiz_attempts').update(values).eq('id', attemptId)
+          if (error) throw error
+        }
+      }
+      return jsonResponse({ success: true })
     }
 
     if (action === 'create_question') {
