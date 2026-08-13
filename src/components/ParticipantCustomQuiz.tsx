@@ -96,7 +96,7 @@ export function ParticipantCustomQuiz({ data, busy, locale, onRetry, onSubmit }:
             </fieldset>
           )
         })}
-        <button disabled={!complete || busy} type="submit"><Send size={18} />{busy ? (english ? 'Submitting…' : '送出中…') : (english ? 'Submit quiz' : '送出測驗')}</button>
+        <button disabled={!complete || busy} type="submit"><Send size={18} />{busy ? (english ? 'Submitting…' : '送出中…') : (english ? 'Submit answers' : '送出答案')}</button>
       </form>
     </section>
   )
