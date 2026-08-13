@@ -18,6 +18,7 @@ const questionTypeLabels = {
   short_answer: '問答題',
   pronunciation: '朗讀發音',
   oral_response: '口語表達',
+  custom_quiz: '自訂測驗',
 }
 
 const exitTicketCategoryLabels = {

@@ -16,6 +16,7 @@ const questionTypeLabels: Record<Question['type'], string> = {
   short_answer: '問答題',
   pronunciation: '朗讀發音',
   oral_response: '口語表達',
+  custom_quiz: '自訂測驗',
 }
 
 async function fetchAllRows<T>(table: string, sessionId: string, orderColumn: string) {

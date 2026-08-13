@@ -3,6 +3,8 @@ import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
+import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
+import type { QuizSubmission } from '../components/ParticipantCustomQuiz'
 import { ParticipantInterpretationAudio } from '../components/ParticipantInterpretationAudio'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { ExitTicketForm } from '../components/ExitTicketForm'
@@ -23,7 +25,7 @@ import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
 import { participantLocaleFromStorage, participantText } from '../lib/participantI18n'
 import type { ParticipantLocale } from '../lib/participantI18n'
-import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, ParticipantQuizData, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
 
 export function ParticipantPage() {
   const { sessionId = '' } = useParams()
@@ -35,6 +37,10 @@ export function ParticipantPage() {
   const [answer, setAnswer] = useState<Answer | null>(null)
   const [audioResponse, setAudioResponse] = useState<AudioResponse | null>(null)
   const [audioBusy, setAudioBusy] = useState(false)
+  const [quizData, setQuizData] = useState<ParticipantQuizData | null>(null)
+  const [quizBusy, setQuizBusy] = useState(false)
+  const [quizLoadError, setQuizLoadError] = useState('')
+  const [quizGenerating, setQuizGenerating] = useState(false)
   const [screenshot, setScreenshot] = useState<Screenshot | null>(null)
   const [exitTicket, setExitTicket] = useState<ExitTicket | null>(null)
   const [sessionSummary, setSessionSummary] = useState<SessionAnalysis | null>(null)
@@ -111,6 +117,30 @@ export function ParticipantPage() {
         setAudioResponse(null)
       }
 
+      if (nextQuestion?.type === 'custom_quiz' && participantToken) {
+        setQuizLoadError('')
+        const { data: loadedQuiz, error: quizError } = await supabase.functions.invoke('participant-action', {
+          body: { action: 'get_custom_quiz', sessionId, participantId, participantToken, questionId: nextQuestion.id },
+        })
+        if (quizError) {
+          setQuizData(null)
+          setQuizGenerating(false)
+          setQuizLoadError(locale === 'en' ? 'Unable to load this quiz. Please refresh or scan the QR code again.' : '無法載入測驗，請重新整理；若仍無法顯示，請重新掃描 QR Code 加入。')
+        } else if (loadedQuiz?.generating) {
+          setQuizData(null)
+          setQuizGenerating(true)
+        } else {
+          setQuizData((loadedQuiz as ParticipantQuizData | null) || null)
+          setQuizGenerating(false)
+        }
+      } else {
+        setQuizData(null)
+        setQuizGenerating(false)
+        setQuizLoadError(nextQuestion?.type === 'custom_quiz'
+          ? (locale === 'en' ? 'Your participant access has expired. Please scan the QR code again.' : '學員權限已失效，請重新掃描 QR Code 加入。')
+          : '')
+      }
+
       if (nextQuestion?.screenshot_id) {
         const { data } = await supabase.from('screenshots').select('*').eq('id', nextQuestion.screenshot_id).single()
         setScreenshot(data as Screenshot | null)
@@ -119,9 +149,12 @@ export function ParticipantPage() {
       setQuestion(null)
       setAnswer(null)
       setAudioResponse(null)
+      setQuizData(null)
+      setQuizGenerating(false)
+      setQuizLoadError('')
       setScreenshot(null)
     }
-  }, [participantId, participantToken, sessionId])
+  }, [locale, participantId, participantToken, sessionId])
 
   useEffect(() => {
     if (!participantId) navigate(`/join/${sessionId}`)
@@ -130,6 +163,18 @@ export function ParticipantPage() {
   useEffect(() => {
     loadAll()
   }, [loadAll])
+
+  useEffect(() => {
+    if (quizData?.attempt?.status !== 'grading') return
+    const timer = window.setInterval(() => void loadAll(), 2000)
+    return () => window.clearInterval(timer)
+  }, [loadAll, quizData?.attempt?.status])
+
+  useEffect(() => {
+    if (!quizGenerating) return
+    const timer = window.setInterval(() => void loadAll(), 1000)
+    return () => window.clearInterval(timer)
+  }, [loadAll, quizGenerating])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
@@ -220,6 +265,41 @@ export function ParticipantPage() {
       setAnswer(data as Answer)
     } catch (err) {
       setError(err instanceof Error ? err.message : '作答失敗，可能已經提交過。')
+    }
+  }
+
+  async function submitCustomQuiz(answers: QuizSubmission) {
+    if (!participant || !participantToken || !question || question.type !== 'custom_quiz') return
+    setQuizBusy(true)
+    setError('')
+    try {
+      const { data, error: submitError } = await requireSupabase().functions.invoke('participant-action', {
+        body: { action: 'submit_custom_quiz', sessionId, participantId: participant.id, participantToken, questionId: question.id, answers },
+      })
+      if (submitError) throw submitError
+      if (!data?.attempt) throw new Error(data?.message || '自訂測驗送出失敗。')
+      await loadAll()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '自訂測驗送出失敗。')
+    } finally {
+      setQuizBusy(false)
+    }
+  }
+
+  async function retryCustomQuiz() {
+    if (!participant || !participantToken || !question || question.type !== 'custom_quiz') return
+    setQuizBusy(true)
+    setError('')
+    try {
+      const { error: retryError } = await requireSupabase().functions.invoke('participant-action', {
+        body: { action: 'retry_custom_quiz_grading', sessionId, participantId: participant.id, participantToken, questionId: question.id },
+      })
+      if (retryError) throw retryError
+      await loadAll()
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : '無法重新評分。')
+    } finally {
+      setQuizBusy(false)
     }
   }
 
@@ -425,7 +505,17 @@ export function ParticipantPage() {
       )}
       <SharedContentPanel contents={sharedContents} locale={locale} />
       {screenshot && <img alt={participantText(locale, 'imageAlt')} className="participant-image" src={screenshot.public_url} />}
-      <ParticipantQuestionView
+      {question?.type === 'custom_quiz' ? (quizData ? (
+        <ParticipantCustomQuiz data={quizData} busy={quizBusy} locale={locale} onRetry={retryCustomQuiz} onSubmit={submitCustomQuiz} />
+      ) : (
+        <section className="panel participant-question quiz-loading-panel" aria-live="polite">
+          <h2>{locale === 'en' ? 'Custom quiz' : '自訂測驗'}</h2>
+          <p className={quizLoadError ? 'error' : 'muted'}>{quizLoadError || (quizGenerating
+            ? (locale === 'en' ? 'Preparing questions, please wait…' : '出題中，請稍候')
+            : (locale === 'en' ? 'Loading questions…' : '正在載入題目…'))}</p>
+          {quizLoadError && <button type="button" onClick={() => void loadAll()}>{locale === 'en' ? 'Try again' : '重新載入'}</button>}
+        </section>
+      )) : <ParticipantQuestionView
         answer={answer}
         audioBusy={audioBusy}
         audioResponse={audioResponse}
@@ -433,7 +523,7 @@ export function ParticipantPage() {
         locale={locale}
         onSubmit={submitAnswer}
         onSubmitAudio={submitAudio}
-      />
+      />}
       <form className="panel message-form" onSubmit={sendMessage}>
         <label>
           {participantText(locale, 'sendFeedback')}

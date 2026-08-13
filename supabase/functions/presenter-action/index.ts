@@ -1,4 +1,5 @@
 import { callAiJson, corsHeaders, jsonResponse } from '../_shared/ai.ts'
+import { generateCustomQuiz } from '../_shared/custom-quiz.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 type ParticipantRecord = { id: string; name: string }
@@ -180,8 +181,8 @@ Deno.serve(async (req) => {
           ? input.captionDisplayLanguage.trim().toLowerCase()
           : ''
         if (!captionDisplayLanguages.has(displayLanguage)) return jsonResponse({ message: '字幕顯示語言不支援。' }, 400)
-        const interpretationLanguages = Array.isArray(input.interpretationLanguages)
-          ? [...new Set(input.interpretationLanguages.filter((language: unknown): language is string => (
+        const interpretationLanguages: string[] = Array.isArray(input.interpretationLanguages)
+          ? [...new Set((input.interpretationLanguages as unknown[]).filter((language: unknown): language is string => (
             typeof language === 'string' && interpretationLanguagesSupported.has(language) && language !== sourceLanguage
           )))].slice(0, 3)
           : []
@@ -255,6 +256,158 @@ Deno.serve(async (req) => {
         storagePath,
         uploadToken: data.token,
       })
+    }
+
+    if (action === 'create_custom_quiz') {
+      const screenshotId = input.screenshotId
+      const storagePath = typeof input.storagePath === 'string' ? input.storagePath : ''
+      const direction = typeof input.direction === 'string' ? input.direction.trim().slice(0, 2000) : ''
+      const requestedCountValue = input.requestedCount === null || input.requestedCount === '' || input.requestedCount === undefined
+        ? null
+        : Number(input.requestedCount)
+      const requestedCount = typeof requestedCountValue === 'number' && Number.isInteger(requestedCountValue) && requestedCountValue >= 1 && requestedCountValue <= 10
+        ? requestedCountValue
+        : null
+      const requestedType = typeof input.requestedType === 'string' ? input.requestedType : 'random'
+      if (!validUuid(screenshotId) || !direction) return jsonResponse({ message: '請提供有效的截圖與出題方向。' }, 400)
+      if (!['random', 'multiple_choice', 'fill_blank', 'short_answer'].includes(requestedType)) {
+        return jsonResponse({ message: '測驗題型設定不正確。' }, 400)
+      }
+      if (input.requestedCount !== null && input.requestedCount !== '' && input.requestedCount !== undefined && requestedCount === null) {
+        return jsonResponse({ message: '題數必須介於 1 到 10 題。' }, 400)
+      }
+      if (storagePath !== `sessions/${sessionId}/screenshots/${screenshotId}.${storagePath.split('.').at(-1)}` ||
+          !/\.(png|jpg|webp)$/.test(storagePath)) {
+        return jsonResponse({ message: '截圖路徑不正確。' }, 400)
+      }
+
+      const { data: objectList, error: objectError } = await supabase.storage
+        .from('interact-screenshots')
+        .list(`sessions/${sessionId}/screenshots`, { search: `${screenshotId}.`, limit: 2 })
+      if (objectError) throw objectError
+      if (!objectList?.some((object) => storagePath.endsWith(`/${object.name}`))) {
+        return jsonResponse({ message: '找不到已上傳的截圖。' }, 400)
+      }
+
+      const { data: publicData } = supabase.storage.from('interact-screenshots').getPublicUrl(storagePath)
+      const { data: previousSession } = await supabase.from('sessions').select('current_question_id').eq('id', sessionId).single()
+      const previousQuestionId = previousSession?.current_question_id || null
+      const stoppedAt = new Date().toISOString()
+      const { error: stopError } = await supabase.from('questions')
+        .update({ status: 'stopped', stopped_at: stoppedAt })
+        .eq('session_id', sessionId).eq('status', 'active')
+      if (stopError) throw stopError
+
+      const { error: screenshotError } = await supabase.from('screenshots').insert({
+        id: screenshotId,
+        session_id: sessionId,
+        storage_path: storagePath,
+        public_url: publicData.publicUrl,
+        ai_status: 'pending',
+      })
+      if (screenshotError) throw screenshotError
+
+      const questionId = crypto.randomUUID()
+      const quizId = crypto.randomUUID()
+      const { error: questionError } = await supabase.from('questions').insert({
+        id: questionId,
+        session_id: sessionId,
+        screenshot_id: screenshotId,
+        type: 'custom_quiz',
+        status: 'active',
+        title: '出題中，請稍候',
+        prompt_text: direction,
+        options: [],
+        translations: { en: { title: 'Preparing questions, please wait', prompt_text: direction, options: [] } },
+        allow_multiple: false,
+      }).select('*').single()
+      if (questionError) throw questionError
+
+      const { error: sessionError } = await supabase.from('sessions')
+        .update({ current_question_id: questionId }).eq('id', sessionId).eq('status', 'active')
+      if (sessionError) throw sessionError
+
+      try {
+        const generated = await generateCustomQuiz({
+          screenshotUrl: publicData.publicUrl,
+          direction,
+          requestedCount,
+          requestedType: requestedType as 'random' | 'multiple_choice' | 'fill_blank' | 'short_answer',
+        })
+
+        const { error: screenshotUpdateError } = await supabase.from('screenshots').update({
+          ai_status: 'success',
+          screen_summary: { quiz_title: generated.title, item_count: generated.items.length },
+        }).eq('id', screenshotId)
+        if (screenshotUpdateError) throw screenshotUpdateError
+
+        const { error: quizError } = await supabase.from('quizzes').insert({
+          id: quizId,
+          session_id: sessionId,
+          question_id: questionId,
+          title: generated.title,
+          direction,
+          requested_count: requestedCount,
+          requested_type: requestedType,
+        })
+        if (quizError) throw quizError
+
+        const { error: itemError } = await supabase.from('quiz_items').insert(generated.items.map((item) => ({
+          id: item.id,
+          quiz_id: quizId,
+          position: item.position,
+          type: item.type,
+          prompt_text: item.prompt_text,
+          options: item.options,
+          points: item.points,
+          translations: item.translations,
+        })))
+        if (itemError) throw itemError
+
+        const { error: keyError } = await supabase.from('quiz_item_keys').insert(generated.items.map((item) => ({
+          item_id: item.id,
+          accepted_answers: item.accepted_answers,
+          rubric: item.rubric,
+        })))
+        if (keyError) throw keyError
+
+        const { data: question, error: questionUpdateError } = await supabase.from('questions').update({
+          title: generated.title,
+          translations: { en: { title: 'AI custom quiz', prompt_text: direction, options: [] } },
+        }).eq('id', questionId).select('*').single()
+        if (questionUpdateError) throw questionUpdateError
+        return jsonResponse({ question, quizId })
+      } catch (error) {
+        await supabase.from('sessions').update({ current_question_id: previousQuestionId }).eq('id', sessionId).eq('current_question_id', questionId)
+        await supabase.from('questions').delete().eq('id', questionId)
+        await supabase.from('screenshots').delete().eq('id', screenshotId)
+        if (previousQuestionId) {
+          await supabase.from('questions').update({ status: 'active', stopped_at: null }).eq('id', previousQuestionId).eq('session_id', sessionId)
+        }
+        throw error
+      }
+    }
+
+    if (action === 'get_custom_quiz_results') {
+      const questionId = input.questionId
+      if (!validUuid(questionId)) return jsonResponse({ message: '測驗資料格式不正確。' }, 400)
+      const { data: quiz, error: quizError } = await supabase.from('quizzes').select('*')
+        .eq('question_id', questionId).eq('session_id', sessionId).maybeSingle()
+      if (quizError) throw quizError
+      if (!quiz) return jsonResponse({ message: '找不到自訂測驗。' }, 404)
+      const [{ data: items, error: itemError }, { data: attempts, error: attemptError }] = await Promise.all([
+        supabase.from('quiz_items').select('*').eq('quiz_id', quiz.id).order('position'),
+        supabase.from('quiz_attempts').select('*').eq('quiz_id', quiz.id).order('submitted_at'),
+      ])
+      if (itemError || attemptError) throw itemError || attemptError
+      const itemIds = (items || []).map((item) => item.id)
+      const attemptIds = (attempts || []).map((attempt) => attempt.id)
+      const [{ data: keys, error: keyError }, { data: answers, error: answerError }] = await Promise.all([
+        itemIds.length ? supabase.from('quiz_item_keys').select('*').in('item_id', itemIds) : Promise.resolve({ data: [], error: null }),
+        attemptIds.length ? supabase.from('quiz_item_answers').select('*').in('attempt_id', attemptIds) : Promise.resolve({ data: [], error: null }),
+      ])
+      if (keyError || answerError) throw keyError || answerError
+      return jsonResponse({ quiz, items: items || [], attempts: attempts || [], answers: answers || [], keys: keys || [] })
     }
 
     if (action === 'create_question') {

@@ -68,7 +68,9 @@ export type Screenshot = {
   created_at: string
 }
 
-export type QuestionType = 'send_screen' | 'poll' | 'multiple_choice' | 'true_false' | 'short_answer' | 'pronunciation' | 'oral_response'
+export type QuestionType = 'send_screen' | 'poll' | 'multiple_choice' | 'true_false' | 'short_answer' | 'pronunciation' | 'oral_response' | 'custom_quiz'
+export type QuizItemType = 'multiple_choice' | 'fill_blank' | 'short_answer'
+export type QuizRequestedType = 'random' | QuizItemType
 export type ExitTicketCategory = 'lesson_summary' | 'learning_assessment' | 'course_satisfaction' | 'student_question'
 export type ExitTicketResponseType = 'text' | 'rating'
 
@@ -265,6 +267,77 @@ export type SessionAnalysis = {
   }
   limitations: string[]
   translations?: { en?: Omit<SessionAnalysis, 'translations'> }
+}
+
+export type Quiz = {
+  id: string
+  session_id: string
+  question_id: string
+  title: string
+  direction: string
+  requested_count: number | null
+  requested_type: QuizRequestedType
+  total_points: number
+  created_at: string
+}
+
+export type QuizItem = {
+  id: string
+  quiz_id: string
+  position: number
+  type: QuizItemType
+  prompt_text: string
+  options: string[]
+  points: number
+  translations: {
+    en?: {
+      prompt_text?: string
+      options?: string[]
+    }
+  }
+  created_at: string
+}
+
+export type QuizAttemptStatus = 'grading' | 'graded' | 'failed'
+
+export type QuizAttempt = {
+  id: string
+  session_id: string
+  question_id: string
+  quiz_id: string
+  participant_id: string
+  participant_name: string
+  status: QuizAttemptStatus
+  total_score: number | null
+  max_score: number
+  feedback: { zh_tw?: string; en?: string } | null
+  error_message: string | null
+  submitted_at: string
+  graded_at: string | null
+}
+
+export type QuizItemAnswer = {
+  id: string
+  attempt_id: string
+  item_id: string
+  answer_text: string | null
+  answer_values: string[] | null
+  score: number | null
+  feedback: { zh_tw?: string; en?: string } | null
+  created_at: string
+}
+
+export type ParticipantQuizData = {
+  quiz: Quiz
+  items: QuizItem[]
+  attempt: QuizAttempt | null
+  answers: QuizItemAnswer[]
+}
+
+export type PresenterQuizResults = ParticipantQuizData & {
+  attempts: QuizAttempt[]
+  answers: QuizItemAnswer[]
+  keys: Array<{ item_id: string; accepted_answers: string[]; rubric: string }>
 }
 
 export type AiSummary = {
