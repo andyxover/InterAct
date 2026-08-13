@@ -496,6 +496,7 @@ ipcMain.handle('window:set-expanded', (_event, expanded, settingsOpen = false, i
   // suspend the presenter topmost reinforcement while settings are interactive.
   setPresenterTopmost(!(settingsOpen || interactiveOpen))
   setControlBounds(Boolean(expanded), false, settingsOpen)
+  setTimeout(() => bringControlToFront(false), 30)
 })
 
 ipcMain.handle('lottery:set-interactive', (_event, enabled) => {
@@ -574,24 +575,33 @@ ipcMain.handle('capture:start-selection', async () => {
   mainWindow.hide()
   overlayVisibilitySuppressed = true
   overlayWindow?.hide()
-  await new Promise((resolve) => setTimeout(resolve, 160))
+  try {
+    await new Promise((resolve) => setTimeout(resolve, 160))
 
-  const sources = await listCaptureSources(targetDisplay, ['screen'])
-  const displayIndex = screen.getAllDisplays().findIndex((display) => display.id === targetDisplay.id)
-  const captureSource = sources.find((source) => source.displayId === String(targetDisplay.id))
-    || sources.find((source) => source.id.startsWith(`screen:${displayIndex}:`))
-    || sources[displayIndex]
-  if (!captureSource) throw new Error('找不到可截取的螢幕來源。')
+    const sources = await listCaptureSources(targetDisplay, ['screen'])
+    const displayIndex = screen.getAllDisplays().findIndex((display) => display.id === targetDisplay.id)
+    const captureSource = sources.find((source) => source.displayId === String(targetDisplay.id))
+      || sources.find((source) => source.id.startsWith(`screen:${displayIndex}:`))
+      || sources[displayIndex]
+    if (!captureSource) throw new Error('找不到可截取的螢幕來源。')
 
-  mainWindow.setBounds(targetDisplay.bounds)
-  mainWindow.show()
-  mainWindow.focus()
-  return captureSource
+    mainWindow.setBounds(targetDisplay.bounds)
+    mainWindow.show()
+    mainWindow.focus()
+    return captureSource
+  } catch (error) {
+    overlayVisibilitySuppressed = false
+    setControlBounds(false)
+    bringControlToFront(true)
+    showOverlayInactive()
+    throw error
+  }
 })
 
 ipcMain.handle('capture:finish-selection', (_event, expanded = true) => {
   setControlBounds(Boolean(expanded))
   overlayVisibilitySuppressed = false
+  bringControlToFront(true)
   showOverlayInactive()
   setTimeout(() => {
     showOverlayInactive()

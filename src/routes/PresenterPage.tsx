@@ -104,8 +104,6 @@ export function PresenterPage() {
   const activeSelectionPointerId = useRef<number | null>(null)
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null)
   const selectionRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
-  const qrPressStartRef = useRef<{ pointerId: number; x: number; y: number; startedAt: number } | null>(null)
-  const lastQrPressRef = useRef<{ x: number; y: number; time: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [liveCaptions, setLiveCaptions] = useState<Record<string, string>>({})
   const captionConnectionsRef = useRef<Array<{ close: () => void }>>([])
@@ -913,39 +911,6 @@ export function PresenterPage() {
     cropCapture(rect)
   }
 
-  function beginQrPress(event: ReactPointerEvent<HTMLElement>) {
-    if (!event.isPrimary || (event.pointerType === 'mouse' && event.button !== 0)) return
-    if ((event.target as HTMLElement).closest('button, a, input, textarea, select')) return
-    qrPressStartRef.current = {
-      pointerId: event.pointerId,
-      x: event.clientX,
-      y: event.clientY,
-      startedAt: Date.now(),
-    }
-  }
-
-  function finishQrPress(event: ReactPointerEvent<HTMLElement>) {
-    const start = qrPressStartRef.current
-    if (!start || start.pointerId !== event.pointerId) return
-    qrPressStartRef.current = null
-
-    const now = Date.now()
-    const movement = Math.hypot(event.clientX - start.x, event.clientY - start.y)
-    if (movement > 18 || now - start.startedAt > 550) {
-      lastQrPressRef.current = null
-      return
-    }
-
-    const previous = lastQrPressRef.current
-    if (previous && now - previous.time <= 500 && Math.hypot(event.clientX - previous.x, event.clientY - previous.y) <= 48) {
-      lastQrPressRef.current = null
-      setControlsOpen((current) => !current)
-      return
-    }
-
-    lastQrPressRef.current = { x: event.clientX, y: event.clientY, time: now }
-  }
-
   async function createScreenshotQuestion(type: QuestionType, options: string[], allowMultiple: boolean, promptText: string, quizSettings?: CustomQuizSettings) {
     if (!captureFile) return
 
@@ -1336,11 +1301,11 @@ export function PresenterPage() {
             onClose={window.interactDesktop ? () => setCloseConfirmOpen(true) : undefined}
             onMinimize={window.interactDesktop ? () => window.interactDesktop?.minimize() : undefined}
             qrInteractionProps={{
-              onPointerCancel: (event) => {
-                if (qrPressStartRef.current?.pointerId === event.pointerId) qrPressStartRef.current = null
+              onDoubleClick: (event) => {
+                event.preventDefault()
+                event.stopPropagation()
+                setControlsOpen((current) => !current)
               },
-              onPointerDown: beginQrPress,
-              onPointerUp: finishQrPress,
             }}
           />
         </aside>
