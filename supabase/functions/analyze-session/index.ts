@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (cached?.input_json?.analysis_version === 6) {
+    if (cached?.input_json?.analysis_version === 7) {
       return jsonResponse({ analysis: cached.output_json, metrics: cached.input_json?.metrics, cached: true })
     }
 
@@ -158,16 +158,40 @@ Deno.serve(async (req) => {
     const audioResponses = audioResponseResult.data || []
     const questionAnalyses = questionAnalysisResult.data || []
     const exitTickets = exitTicketResult.data || []
+    const { data: quizzes, error: quizError } = await supabase.from('quizzes').select('*')
+      .eq('session_id', sessionId).order('created_at').limit(500)
+    if (quizError) throw quizError
+    const quizIds = (quizzes || []).map((quiz) => quiz.id)
+    const [{ data: quizItems, error: quizItemError }, { data: quizAttempts, error: quizAttemptError }] = quizIds.length
+      ? await Promise.all([
+        supabase.from('quiz_items').select('*').in('quiz_id', quizIds).order('position').limit(5000),
+        supabase.from('quiz_attempts').select('*').eq('session_id', sessionId).in('quiz_id', quizIds).order('submitted_at').limit(10000),
+      ])
+      : [{ data: [], error: null }, { data: [], error: null }]
+    if (quizItemError || quizAttemptError) throw quizItemError || quizAttemptError
+    const quizItemIds = (quizItems || []).map((item) => item.id)
+    const quizAttemptIds = (quizAttempts || []).map((attempt) => attempt.id)
+    const [{ data: quizKeys, error: quizKeyError }, { data: quizItemAnswers, error: quizAnswerError }] = await Promise.all([
+      quizItemIds.length ? supabase.from('quiz_item_keys').select('*').in('item_id', quizItemIds) : Promise.resolve({ data: [], error: null }),
+      quizAttemptIds.length ? supabase.from('quiz_item_answers').select('*').in('attempt_id', quizAttemptIds).order('created_at').limit(50000) : Promise.resolve({ data: [], error: null }),
+    ])
+    if (quizKeyError || quizAnswerError) throw quizKeyError || quizAnswerError
     const interactiveQuestions = questions.filter((question) => question.type !== 'send_screen')
     const assessedAnswers = answers.filter((answer) => answer.is_correct !== null)
     const correctAnswers = assessedAnswers.filter((answer) => answer.is_correct)
+    const submittedQuizAttempts = quizAttempts || []
+    const scoredQuizItemAnswers = (quizItemAnswers || []).filter((answer) => typeof answer.score === 'number')
+    const quizItemPoints = new Map((quizItems || []).map((item) => [item.id, Number(item.points) || 0]))
+    const correctQuizItemAnswers = scoredQuizItemAnswers.filter((answer) => Number(answer.score) >= (quizItemPoints.get(answer.item_id) || 0))
     const durationEnd = new Date(endedAt).getTime()
     const durationMinutes = Math.max(0, Math.round((durationEnd - new Date(session.created_at).getTime()) / 60000))
     const averageResponseRate = participants.length && interactiveQuestions.length
-      ? roundPercent((answers.length / (participants.length * interactiveQuestions.length)) * 100)
+      ? roundPercent(((answers.length + submittedQuizAttempts.length) / (participants.length * interactiveQuestions.length)) * 100)
       : 0
 
     const analysisByQuestion = new Map(questionAnalyses.map((item) => [item.question_id, item.output_json]))
+    const quizByQuestion = new Map((quizzes || []).map((quiz) => [quiz.question_id, quiz]))
+    const quizKeyByItem = new Map((quizKeys || []).map((key) => [key.item_id, key]))
     const questionResults = questions.map((question) => {
       const questionAnswers = answers.filter((answer) => answer.question_id === question.id)
       const distribution = Object.fromEntries(
@@ -178,6 +202,42 @@ Deno.serve(async (req) => {
       )
       const assessed = questionAnswers.filter((answer) => answer.is_correct !== null)
       const questionAudioResponses = audioResponses.filter((response) => response.question_id === question.id)
+      const quiz = quizByQuestion.get(question.id)
+      const questionQuizItems = quiz ? (quizItems || []).filter((item) => item.quiz_id === quiz.id) : []
+      const questionQuizAttempts = quiz ? (quizAttempts || []).filter((attempt) => attempt.quiz_id === quiz.id) : []
+      const customQuiz = quiz ? {
+        title: quiz.title,
+        direction: quiz.direction,
+        total_points: quiz.total_points,
+        items: questionQuizItems.map((item) => {
+          const key = quizKeyByItem.get(item.id)
+          return {
+            item_id: item.id,
+            position: item.position,
+            type: item.type,
+            prompt_text: item.prompt_text,
+            options: item.options,
+            points: item.points,
+            accepted_answers: key?.accepted_answers || [],
+            rubric: key?.rubric || '',
+          }
+        }),
+        attempts: questionQuizAttempts.slice(0, 500).map((attempt, index) => ({
+          response_number: index + 1,
+          status: attempt.status,
+          total_score: attempt.total_score,
+          max_score: attempt.max_score,
+          overall_feedback: attempt.feedback,
+          answers: (quizItemAnswers || []).filter((answer) => answer.attempt_id === attempt.id).map((answer) => ({
+            item_id: answer.item_id,
+            answer_text: answer.answer_text,
+            answer_values: answer.answer_values,
+            score: answer.score,
+            feedback: answer.feedback,
+          })),
+        })),
+      } : null
+      const answerCount = quiz ? questionQuizAttempts.length : questionAnswers.length
 
       return {
         question_id: question.id,
@@ -188,8 +248,8 @@ Deno.serve(async (req) => {
         allow_multiple: question.allow_multiple,
         correct_answer: question.correct_answer,
         correct_answers: question.correct_answers,
-        answer_count: questionAnswers.length,
-        response_rate: participants.length ? roundPercent((questionAnswers.length / participants.length) * 100) : 0,
+        answer_count: answerCount,
+        response_rate: participants.length ? roundPercent((answerCount / participants.length) * 100) : 0,
         correct_rate: assessed.length ? roundPercent((assessed.filter((answer) => answer.is_correct).length / assessed.length) * 100) : null,
         distribution,
         written_response_sample: questionAnswers.map((answer) => answer.answer_text).filter(Boolean).slice(0, 100),
@@ -202,6 +262,7 @@ Deno.serve(async (req) => {
           analysis: response.analysis_json,
         })),
         prior_ai_analysis: analysisByQuestion.get(question.id) || null,
+        custom_quiz: customQuiz,
       }
     })
 
@@ -213,11 +274,13 @@ Deno.serve(async (req) => {
       active_message_participants: new Set(messages.map((message) => message.participant_id)).size,
       question_count: questions.length,
       interactive_question_count: interactiveQuestions.length,
-      answer_count: answers.length,
+      answer_count: answers.length + submittedQuizAttempts.length,
       average_response_rate: averageResponseRate,
-      assessed_answer_count: assessedAnswers.length,
-      correct_answer_count: correctAnswers.length,
-      correct_rate: assessedAnswers.length ? roundPercent((correctAnswers.length / assessedAnswers.length) * 100) : null,
+      assessed_answer_count: assessedAnswers.length + scoredQuizItemAnswers.length,
+      correct_answer_count: correctAnswers.length + correctQuizItemAnswers.length,
+      correct_rate: assessedAnswers.length + scoredQuizItemAnswers.length
+        ? roundPercent(((correctAnswers.length + correctQuizItemAnswers.length) / (assessedAnswers.length + scoredQuizItemAnswers.length)) * 100)
+        : null,
       exit_ticket_count: exitTickets.length,
       audio_response_count: audioResponses.length,
       analyzed_audio_count: analyzedAudioResponses.length,
@@ -228,7 +291,7 @@ Deno.serve(async (req) => {
     }
 
     summaryInput = {
-      analysis_version: 6,
+      analysis_version: 7,
       session: {
         title: session.title,
         created_at: session.created_at,
@@ -253,7 +316,7 @@ Deno.serve(async (req) => {
     }
 
     const result = await callAiJson(
-      '你是 InterAct 的課堂互動與形成性評量分析顧問。請先以繁體中文根據匿名化統計、講師派送的課程文字與連結、課堂原文逐字稿、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告；再於 translations.en 輸出結構相同、證據與意義一致的自然英文版本。英文版本是翻譯，不可另行推論。lesson_transcript 是講師授課內容：若有內容，lesson_key_points 必須將整節課整理成精煉、具結構且可直接給教師與學生閱讀的課堂重點，不可逐句照抄、不可顯示逐字稿；若 lesson_transcript 為空，中英文 lesson_key_points 都必須回傳空陣列。逐字稿可用來核對互動脈絡與提出教學建議，但不可把講師說的話誤認為學生意見或學習證據。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。instructor_shared_contents 是講師提供的課程參考資料。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
+      '你是 InterAct 的課堂互動與形成性評量分析顧問。請先以繁體中文根據匿名化統計、講師派送的課程文字與連結、課堂原文逐字稿、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告；再於 translations.en 輸出結構相同、證據與意義一致的自然英文版本。英文版本是翻譯，不可另行推論。lesson_transcript 是講師授課內容：若有內容，lesson_key_points 必須將整節課整理成精煉、具結構且可直接給教師與學生閱讀的課堂重點，不可逐句照抄、不可顯示逐字稿；若 lesson_transcript 為空，中英文 lesson_key_points 都必須回傳空陣列。逐字稿可用來核對互動脈絡與提出教學建議，但不可把講師說的話誤認為學生意見或學習證據。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。自訂測驗的 custom_quiz 包含題目、選項、正確答案、匿名化學生答案、得分與回饋，必須逐題分析其答題表現、錯誤與迷思，並納入對應的 question_findings；只要 attempts 有資料，就不可把該測驗判斷為無人作答。instructor_shared_contents 是講師提供的課程參考資料。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
       summaryInput,
       sessionAnalysisSchema,
     )

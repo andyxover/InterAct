@@ -396,6 +396,39 @@ Deno.serve(async (req) => {
       }
     }
 
+    if (action === 'get_session_custom_quiz_results') {
+      const { data: quizzes, error: quizError } = await supabase.from('quizzes').select('*')
+        .eq('session_id', sessionId).order('created_at')
+      if (quizError) throw quizError
+
+      const quizIds = (quizzes || []).map((quiz) => quiz.id)
+      if (!quizIds.length) {
+        return jsonResponse({ quizzes: [], items: [], attempts: [], answers: [], keys: [] })
+      }
+
+      const [{ data: items, error: itemError }, { data: attempts, error: attemptError }] = await Promise.all([
+        supabase.from('quiz_items').select('*').in('quiz_id', quizIds).order('position'),
+        supabase.from('quiz_attempts').select('*').eq('session_id', sessionId).in('quiz_id', quizIds).order('submitted_at'),
+      ])
+      if (itemError || attemptError) throw itemError || attemptError
+
+      const itemIds = (items || []).map((item) => item.id)
+      const attemptIds = (attempts || []).map((attempt) => attempt.id)
+      const [{ data: keys, error: keyError }, { data: answers, error: answerError }] = await Promise.all([
+        itemIds.length ? supabase.from('quiz_item_keys').select('*').in('item_id', itemIds) : Promise.resolve({ data: [], error: null }),
+        attemptIds.length ? supabase.from('quiz_item_answers').select('*').in('attempt_id', attemptIds).order('created_at') : Promise.resolve({ data: [], error: null }),
+      ])
+      if (keyError || answerError) throw keyError || answerError
+
+      return jsonResponse({
+        quizzes: quizzes || [],
+        items: items || [],
+        attempts: attempts || [],
+        answers: answers || [],
+        keys: keys || [],
+      })
+    }
+
     if (action === 'get_custom_quiz_results') {
       const questionId = input.questionId
       if (!validUuid(questionId)) return jsonResponse({ message: '測驗資料格式不正確。' }, 400)

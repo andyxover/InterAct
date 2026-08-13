@@ -21,6 +21,12 @@ const questionTypeLabels = {
   custom_quiz: '自訂測驗',
 }
 
+const quizItemTypeLabels = {
+  multiple_choice: '選擇題',
+  fill_blank: '填充題',
+  short_answer: '簡答題',
+}
+
 const exitTicketCategoryLabels = {
   lesson_summary: '課程總結',
   learning_assessment: '學習程度評估',
@@ -170,6 +176,9 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
   for (const answer of data.answers) {
     answerCountByParticipant.set(answer.participant_id, (answerCountByParticipant.get(answer.participant_id) || 0) + 1)
   }
+  for (const attempt of data.customQuizResults.attempts) {
+    answerCountByParticipant.set(attempt.participant_id, (answerCountByParticipant.get(attempt.participant_id) || 0) + 1)
+  }
 
   const participants = workbook.addWorksheet('參與者')
   participants.columns = [
@@ -194,6 +203,8 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
 
   const analysisMap = questionAnalysisMap(data)
   const screenshotMap = new Map(data.screenshots.map((screenshot) => [screenshot.id, screenshot.public_url]))
+  const quizByQuestion = new Map(data.customQuizResults.quizzes.map((quiz) => [quiz.question_id, quiz]))
+  const quizKeyByItem = new Map(data.customQuizResults.keys.map((key) => [key.item_id, key]))
   const questions = workbook.addWorksheet('題目')
   questions.columns = [
     { header: '題次', key: 'number', width: 8 },
@@ -213,6 +224,32 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
     const questionAnswers = data.answers.filter((answer) => answer.question_id === question.id)
     const assessed = questionAnswers.filter((answer) => answer.is_correct !== null)
     const questionAnalysis = analysisMap.get(question.id)
+    const quiz = quizByQuestion.get(question.id)
+    if (quiz) {
+      const quizAttempts = data.customQuizResults.attempts.filter((attempt) => attempt.quiz_id === quiz.id)
+      const quizItems = data.customQuizResults.items.filter((item) => item.quiz_id === quiz.id)
+      for (const item of quizItems) {
+        const itemAnswers = data.customQuizResults.answers.filter((answer) => answer.item_id === item.id)
+        const scored = itemAnswers.filter((answer) => typeof answer.score === 'number')
+        const correct = scored.filter((answer) => Number(answer.score) >= Number(item.points))
+        const key = quizKeyByItem.get(item.id)
+        questions.addRow({
+          number: `${index + 1}-${item.position}`,
+          type: `自訂測驗／${quizItemTypeLabels[item.type]}`,
+          title: item.prompt_text,
+          status: question.status,
+          options: item.options.join('\n'),
+          correctAnswer: key?.accepted_answers.join('、') || key?.rubric || '',
+          answerCount: itemAnswers.length,
+          responseRate: data.participants.length ? quizAttempts.length / data.participants.length : 0,
+          correctRate: scored.length ? correct.length / scored.length : '',
+          analysis: questionAnalysis?.response_analysis.understanding_summary || '',
+          misconceptions: questionAnalysis?.response_analysis.misconceptions.join('\n') || '',
+          screenshotUrl: question.screenshot_id ? screenshotMap.get(question.screenshot_id) || '' : '',
+        })
+      }
+      return
+    }
     questions.addRow({
       number: index + 1,
       type: questionTypeLabels[question.type],
@@ -234,6 +271,8 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
 
   const questionNumber = new Map(data.questions.map((question, index) => [question.id, index + 1]))
   const questionById = new Map(data.questions.map((question) => [question.id, question]))
+  const quizItemById = new Map(data.customQuizResults.items.map((item) => [item.id, item]))
+  const quizAttemptById = new Map(data.customQuizResults.attempts.map((attempt) => [attempt.id, attempt]))
   const answers = workbook.addWorksheet('答案')
   answers.columns = [
     { header: '題次', key: 'questionNumber', width: 8 },
@@ -242,6 +281,8 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
     { header: '選項答案', key: 'answerValue', width: 16 },
     { header: '文字答案', key: 'answerText', width: 55 },
     { header: '正確性', key: 'correctness', width: 14 },
+    { header: '得分', key: 'score', width: 12 },
+    { header: 'AI 回饋', key: 'feedback', width: 55 },
     { header: '送出時間', key: 'submittedAt', width: 22 },
   ]
   for (const answer of data.answers) {
@@ -256,8 +297,59 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
       submittedAt: formatDate(answer.submitted_at),
     })
   }
+  for (const answer of data.customQuizResults.answers) {
+    const attempt = quizAttemptById.get(answer.attempt_id)
+    const item = quizItemById.get(answer.item_id)
+    if (!attempt || !item) continue
+    const itemPoints = Number(item.points) || 0
+    const score = typeof answer.score === 'number' ? answer.score : null
+    answers.addRow({
+      questionNumber: `${questionNumber.get(attempt.question_id) || ''}-${item.position}`,
+      questionType: `自訂測驗／${quizItemTypeLabels[item.type]}`,
+      participantName: attempt.participant_name,
+      answerValue: answer.answer_values?.join('、') || '',
+      answerText: answer.answer_text || '',
+      correctness: score === null ? '評分中' : score >= itemPoints ? '正確／滿分' : score > 0 ? '部分得分' : '錯誤／零分',
+      score: score === null ? '' : `${score}/${itemPoints}`,
+      feedback: answer.feedback?.zh_tw || answer.feedback?.en || '',
+      submittedAt: formatDate(answer.created_at),
+    })
+  }
   answers.getColumn('submittedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
   styleTableSheet(answers)
+
+  const quizScores = workbook.addWorksheet('自訂測驗總成績')
+  quizScores.columns = [
+    { header: '題次', key: 'questionNumber', width: 10 },
+    { header: '測驗名稱', key: 'quizTitle', width: 42 },
+    { header: '姓名', key: 'participantName', width: 20 },
+    { header: '狀態', key: 'status', width: 14 },
+    { header: '總分', key: 'totalScore', width: 12 },
+    { header: '滿分', key: 'maxScore', width: 12 },
+    { header: 'AI 總回饋', key: 'feedback', width: 65 },
+    { header: '錯誤訊息', key: 'error', width: 42 },
+    { header: '送出時間', key: 'submittedAt', width: 22 },
+    { header: '評分完成時間', key: 'gradedAt', width: 22 },
+  ]
+  const quizById = new Map(data.customQuizResults.quizzes.map((quiz) => [quiz.id, quiz]))
+  for (const attempt of data.customQuizResults.attempts) {
+    const quiz = quizById.get(attempt.quiz_id)
+    quizScores.addRow({
+      questionNumber: questionNumber.get(attempt.question_id) || '',
+      quizTitle: quiz?.title || '',
+      participantName: attempt.participant_name,
+      status: attempt.status === 'graded' ? '已評分' : attempt.status === 'grading' ? '評分中' : '評分失敗',
+      totalScore: attempt.total_score ?? '',
+      maxScore: attempt.max_score,
+      feedback: attempt.feedback?.zh_tw || attempt.feedback?.en || '',
+      error: attempt.error_message || '',
+      submittedAt: formatDate(attempt.submitted_at),
+      gradedAt: formatDate(attempt.graded_at),
+    })
+  }
+  quizScores.getColumn('submittedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
+  quizScores.getColumn('gradedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
+  styleTableSheet(quizScores)
 
   const audioResponses = workbook.addWorksheet('錄音評測')
   audioResponses.columns = [
