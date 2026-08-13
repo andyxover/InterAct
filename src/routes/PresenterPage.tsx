@@ -1346,6 +1346,7 @@ export function PresenterPage() {
         />
         {question?.type === 'custom_quiz' ? (
           <CustomQuizResult
+            anonymousEnabled={session.anonymous_enabled}
             onlineCount={onlineParticipants.length}
             question={question}
             results={quizResults}

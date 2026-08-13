@@ -18,6 +18,7 @@ export function ParticipantCustomQuiz({ data, busy, locale, onRetry, onSubmit }:
   const [textAnswers, setTextAnswers] = useState<Record<string, string>>({})
   const [choiceAnswers, setChoiceAnswers] = useState<Record<string, string>>({})
   const english = locale === 'en'
+  const usesAiGrading = data.items.some((item) => item.type !== 'multiple_choice')
 
   useEffect(() => {
     setTextAnswers({})
@@ -44,8 +45,8 @@ export function ParticipantCustomQuiz({ data, busy, locale, onRetry, onSubmit }:
         <div className="quiz-status-heading">
           {graded ? <CheckCircle2 size={24} /> : failed ? <RefreshCw size={24} /> : <Clock3 size={24} />}
           <div>
-            <h2>{english ? 'Custom quiz' : '自訂測驗'}</h2>
-            <p>{graded ? (english ? 'AI grading completed' : 'AI 評分完成') : failed ? (english ? 'Grading was interrupted' : '評分暫時失敗') : (english ? 'Submitted. AI is grading in the background…' : '已送出，AI 正在背景評分…')}</p>
+            <h2>{data.quiz.title}</h2>
+            <p>{graded ? (english ? 'Grading completed' : '評分完成') : failed ? (english ? 'Grading was interrupted' : '評分暫時失敗') : usesAiGrading ? (english ? 'Submitted. AI is grading in the background…' : '已送出，AI 正在背景評分…') : (english ? 'Submitted. Calculating the score…' : '已送出，正在計算分數…')}</p>
           </div>
           {graded && <strong className="quiz-total-score">{data.attempt.total_score}/{data.attempt.max_score}</strong>}
         </div>
@@ -67,8 +68,10 @@ export function ParticipantCustomQuiz({ data, busy, locale, onRetry, onSubmit }:
 
   return (
     <section className="panel participant-question participant-custom-quiz">
-      <h2>{english ? 'Custom quiz' : data.quiz.title}</h2>
-      <p className="muted">{english ? 'Answer every question, then submit once. AI will grade and provide feedback.' : '請完成所有題目後一次送出，AI 將自動評分並提供回饋。'}</p>
+      <h2>{data.quiz.title}</h2>
+      <p className="muted">{usesAiGrading
+        ? (english ? 'Answer every question, then submit once. AI will grade written answers and provide feedback.' : '請完成所有題目後一次送出；填充與簡答題會由 AI 評分並提供回饋。')
+        : (english ? 'Answer every question, then submit once. Multiple-choice questions are scored immediately from the answer key without AI.' : '請完成所有題目後一次送出；選擇題會直接依答案計分，不會呼叫 AI 評分。')}</p>
       <form className="custom-quiz-form" onSubmit={submit}>
         {data.items.map((item, index) => {
           const translation = english ? item.translations?.en : undefined

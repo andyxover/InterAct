@@ -114,17 +114,25 @@ export async function generateCustomQuiz(input: {
   const typeInstruction = input.requestedType === 'random'
     ? '可依出題方向與素材混合使用選擇、填充與簡答題。'
     : `每一題都必須是 ${input.requestedType}。`
+  const requestedLanguage = /(?:英文|英語|english)/i.test(input.direction)
+    ? 'English'
+    : /(?:繁體中文|正體中文|traditional chinese|zh-tw)/i.test(input.direction)
+      ? 'Traditional Chinese (Taiwan)'
+      : 'auto'
+  const languageInstruction = requestedLanguage === 'auto'
+    ? '題目、選項、答案與評分準則必須使用教師在出題方向中指定的語言；若未指定，使用出題方向與教材的主要語言。'
+    : `教師已指定測驗語言為 ${requestedLanguage}；題目標題、題幹、選項、答案與評分準則都必須使用 ${requestedLanguage}。`
 
   const requestBody = JSON.stringify({
     systemInstruction: {
       parts: [{
-        text: `你是 InterAct 的測驗設計助理。請根據教師截圖和出題方向建立適合課堂即時作答的測驗。題目主文必須使用台灣慣用繁體中文並提供忠實自然的英文翻譯。${countInstruction}${typeInstruction} 選擇題須有 2 至 6 個互不重複的選項，accepted_answers 只能包含正確選項原文。填充題請在題幹使用 ____ 標示作答處，accepted_answers 提供可接受答案與常見同義答案。簡答題提供參考答案於 accepted_answers，並在 rubric 寫出具體評分準則。不得捏造截圖無法支持的專有事實；若截圖資訊有限，應依教師的出題方向設計可合理回答的理解題。`,
+        text: `你是 InterAct 的測驗設計助理。請根據教師截圖和出題方向建立適合課堂即時作答的測驗。${languageInstruction} translation_en 一律提供忠實自然的英文版本；若主文已是英文則保持相同意思。${countInstruction}${typeInstruction} 選擇題須有 2 至 6 個互不重複的選項，accepted_answers 只能包含正確選項原文。填充題請在題幹使用 ____ 標示作答處，accepted_answers 提供可接受答案與常見同義答案。簡答題提供參考答案於 accepted_answers，並在 rubric 寫出具體評分準則。不得捏造截圖無法支持的專有事實；若截圖資訊有限，應依教師的出題方向設計可合理回答的理解題。`,
       }],
     },
     contents: [{
       role: 'user',
       parts: [
-        { text: JSON.stringify({ direction: input.direction, requested_count: input.requestedCount, requested_type: input.requestedType }) },
+        { text: JSON.stringify({ direction: input.direction, requested_count: input.requestedCount, requested_type: input.requestedType, requested_language: requestedLanguage }) },
         { inlineData: { mimeType, data: imageBase64 } },
       ],
     }],
@@ -206,7 +214,9 @@ export async function generateCustomQuiz(input: {
   })
 
   return {
-    title: typeof output.title === 'string' && output.title.trim() ? output.title.trim().slice(0, 200) : 'AI 自訂測驗',
+    title: typeof output.title === 'string' && output.title.trim()
+      ? output.title.trim().slice(0, 200)
+      : requestedLanguage === 'English' ? 'AI Custom Quiz' : 'AI 自訂測驗',
     items,
   }
 }
@@ -242,16 +252,20 @@ export async function gradeCustomQuizAttempt(attemptId: string) {
       }
     })
 
-    const result = await callAiJson(
-      '你是 InterAct 的形成性評量評分助理。依每題配分、參考答案與 rubric 評分。選擇題必須完全依正確選項判定；填充題接受語意相同且沒有概念錯誤的答案；簡答題依 rubric 給部分分。每題分數不得小於 0 或超過該題 points。以台灣繁體中文提供簡潔、具體且鼓勵性的回饋，並提供忠實英文翻譯。不得因文法或用字風格與參考答案不同而扣除內容正確答案的分數。',
-      { items: gradingInput },
-      gradingSchema,
-    )
-    if (result.status !== 'success') throw new Error(String((result.output as { message?: string }).message || 'AI grading failed.'))
-    const output = result.output as {
+    const aiGradingInput = gradingInput.filter((item) => item.type !== 'multiple_choice')
+    let output: {
       evaluations?: Array<{ item_id?: string; score?: number; feedback_zh_tw?: string; feedback_en?: string }>
       overall_feedback_zh_tw?: string
       overall_feedback_en?: string
+    } = { evaluations: [] }
+    if (aiGradingInput.length) {
+      const result = await callAiJson(
+        '你是 InterAct 的形成性評量評分助理。依每題配分、參考答案與 rubric 評分。填充題接受語意相同且沒有概念錯誤的答案；簡答題依 rubric 給部分分。每題分數不得小於 0 或超過該題 points。以台灣繁體中文提供簡潔、具體且鼓勵性的回饋，並提供忠實英文翻譯。不得因文法或用字風格與參考答案不同而扣除內容正確答案的分數。',
+        { items: aiGradingInput },
+        gradingSchema,
+      )
+      if (result.status !== 'success') throw new Error(String((result.output as { message?: string }).message || 'AI grading failed.'))
+      output = result.output as typeof output
     }
     const evaluationByItem = new Map((output.evaluations || []).map((evaluation) => [evaluation.item_id, evaluation]))
     let totalScore = 0
@@ -259,14 +273,25 @@ export async function gradeCustomQuizAttempt(attemptId: string) {
     for (const item of items) {
       const answer = answerByItem.get(item.id)
       const key = keyByItem.get(item.id)
+      if (!answer || !key) throw new Error('Quiz answer data is incomplete.')
       const evaluation = evaluationByItem.get(item.id)
-      if (!answer || !key || !evaluation) throw new Error('AI grading result is incomplete.')
-      let score = Math.max(0, Math.min(item.points, Number(evaluation.score) || 0))
+      let score = 0
+      let feedbackZhTw = ''
+      let feedbackEn = ''
       if (item.type === 'multiple_choice') {
         const expected = [...new Set(key.accepted_answers || [])].sort()
         const submitted = [...new Set(answer.answer_values || [])].sort()
-        score = expected.length === submitted.length && expected.every((value, index) => value === submitted[index]) ? item.points : 0
-      } else if (item.type === 'fill_blank') {
+        const correct = expected.length === submitted.length && expected.every((value, index) => value === submitted[index])
+        score = correct ? item.points : 0
+        feedbackZhTw = correct ? '回答正確。' : `回答錯誤，正確答案：${expected.join('、')}`
+        feedbackEn = correct ? 'Correct.' : `Incorrect. Correct answer: ${expected.join(', ')}`
+      } else {
+        if (!evaluation) throw new Error('AI grading result is incomplete.')
+        score = Math.max(0, Math.min(item.points, Number(evaluation.score) || 0))
+        feedbackZhTw = String(evaluation.feedback_zh_tw || '')
+        feedbackEn = String(evaluation.feedback_en || '')
+      }
+      if (item.type === 'fill_blank') {
         const submitted = normalizedAnswer(answer.answer_text || '')
         if ((key.accepted_answers || []).some((value: string) => normalizedAnswer(value) === submitted)) score = item.points
       }
@@ -275,20 +300,26 @@ export async function gradeCustomQuizAttempt(attemptId: string) {
       const { error } = await supabase.from('quiz_item_answers').update({
         score,
         feedback: {
-          zh_tw: String(evaluation.feedback_zh_tw || ''),
-          en: String(evaluation.feedback_en || ''),
+          zh_tw: feedbackZhTw,
+          en: feedbackEn,
         },
       }).eq('id', answer.id)
       if (error) throw error
     }
 
     totalScore = Math.round(totalScore * 100) / 100
+    const overallFeedbackZhTw = aiGradingInput.length
+      ? String(output.overall_feedback_zh_tw || '')
+      : `本次選擇題得分 ${totalScore}/100。`
+    const overallFeedbackEn = aiGradingInput.length
+      ? String(output.overall_feedback_en || '')
+      : `Multiple-choice score: ${totalScore}/100.`
     const { error: updateError } = await supabase.from('quiz_attempts').update({
       status: 'graded',
       total_score: totalScore,
       feedback: {
-        zh_tw: String(output.overall_feedback_zh_tw || ''),
-        en: String(output.overall_feedback_en || ''),
+        zh_tw: overallFeedbackZhTw,
+        en: overallFeedbackEn,
       },
       error_message: null,
       graded_at: new Date().toISOString(),

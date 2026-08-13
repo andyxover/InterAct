@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
@@ -40,7 +40,6 @@ export function ParticipantPage() {
   const [quizData, setQuizData] = useState<ParticipantQuizData | null>(null)
   const [quizBusy, setQuizBusy] = useState(false)
   const [quizLoadError, setQuizLoadError] = useState('')
-  const [quizGenerating, setQuizGenerating] = useState(false)
   const [screenshot, setScreenshot] = useState<Screenshot | null>(null)
   const [exitTicket, setExitTicket] = useState<ExitTicket | null>(null)
   const [sessionSummary, setSessionSummary] = useState<SessionAnalysis | null>(null)
@@ -52,6 +51,8 @@ export function ParticipantPage() {
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
   const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
+  const loadSequence = useRef(0)
+  const loadedQuizQuestionId = useRef('')
   const navigate = useNavigate()
   useSessionPresence(sessionId, session?.status === 'active' ? participant : null)
   const localizedSummary = locale === 'en' ? sessionSummary?.translations?.en || sessionSummary : sessionSummary
@@ -63,6 +64,7 @@ export function ParticipantPage() {
 
   const loadAll = useCallback(async () => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
+    const requestId = ++loadSequence.current
     const supabase = requireSupabase()
     const [{ data: sessionData }, { data: participantData }, { data: exitTicketData }, { data: sharedContentData }, { data: buzzerData }] = await Promise.all([
       supabase.from('sessions').select('*').eq('id', sessionId).single(),
@@ -71,6 +73,7 @@ export function ParticipantPage() {
       supabase.from('shared_contents').select('*').eq('session_id', sessionId).order('created_at', { ascending: false }),
       supabase.from('session_events').select('*').eq('session_id', sessionId).eq('event_type', 'buzzer').order('created_at', { ascending: false }).limit(1).maybeSingle(),
     ])
+    if (requestId !== loadSequence.current) return
     const nextSession = sessionData as Session | null
     setSession(nextSession)
     setParticipant(participantData as Participant | null)
@@ -98,9 +101,14 @@ export function ParticipantPage() {
         supabase.from('questions').select('*').eq('id', nextSession.current_question_id).single(),
         supabase.from('answers').select('*').eq('question_id', nextSession.current_question_id).eq('participant_id', participantId).maybeSingle(),
       ])
+      if (requestId !== loadSequence.current) return
       const nextQuestion = questionData as Question | null
       setQuestion(nextQuestion)
       setAnswer((answerData as Answer | null) || null)
+      if (nextQuestion?.type === 'custom_quiz') {
+        if (loadedQuizQuestionId.current !== nextQuestion.id) setQuizData(null)
+        setQuizLoadError('')
+      }
 
       if (nextQuestion && ['pronunciation', 'oral_response'].includes(nextQuestion.type) && participantToken) {
         const { data: recordingData } = await supabase.functions.invoke('participant-action', {
@@ -112,6 +120,7 @@ export function ParticipantPage() {
             questionId: nextQuestion.id,
           },
         })
+        if (requestId !== loadSequence.current) return
         setAudioResponse((recordingData?.response as AudioResponse | null) || null)
       } else {
         setAudioResponse(null)
@@ -122,20 +131,19 @@ export function ParticipantPage() {
         const { data: loadedQuiz, error: quizError } = await supabase.functions.invoke('participant-action', {
           body: { action: 'get_custom_quiz', sessionId, participantId, participantToken, questionId: nextQuestion.id },
         })
+        if (requestId !== loadSequence.current) return
         if (quizError) {
           setQuizData(null)
-          setQuizGenerating(false)
           setQuizLoadError(locale === 'en' ? 'Unable to load this quiz. Please refresh or scan the QR code again.' : '無法載入測驗，請重新整理；若仍無法顯示，請重新掃描 QR Code 加入。')
         } else if (loadedQuiz?.generating) {
           setQuizData(null)
-          setQuizGenerating(true)
         } else {
+          loadedQuizQuestionId.current = nextQuestion.id
           setQuizData((loadedQuiz as ParticipantQuizData | null) || null)
-          setQuizGenerating(false)
         }
       } else {
+        loadedQuizQuestionId.current = ''
         setQuizData(null)
-        setQuizGenerating(false)
         setQuizLoadError(nextQuestion?.type === 'custom_quiz'
           ? (locale === 'en' ? 'Your participant access has expired. Please scan the QR code again.' : '學員權限已失效，請重新掃描 QR Code 加入。')
           : '')
@@ -143,14 +151,17 @@ export function ParticipantPage() {
 
       if (nextQuestion?.screenshot_id) {
         const { data } = await supabase.from('screenshots').select('*').eq('id', nextQuestion.screenshot_id).single()
+        if (requestId !== loadSequence.current) return
         setScreenshot(data as Screenshot | null)
+      } else {
+        setScreenshot(null)
       }
     } else {
       setQuestion(null)
       setAnswer(null)
       setAudioResponse(null)
+      loadedQuizQuestionId.current = ''
       setQuizData(null)
-      setQuizGenerating(false)
       setQuizLoadError('')
       setScreenshot(null)
     }
@@ -171,10 +182,10 @@ export function ParticipantPage() {
   }, [loadAll, quizData?.attempt?.status])
 
   useEffect(() => {
-    if (!quizGenerating) return
-    const timer = window.setInterval(() => void loadAll(), 1000)
+    if (question?.type !== 'custom_quiz' || quizData) return
+    const timer = window.setInterval(() => void loadAll(), 1500)
     return () => window.clearInterval(timer)
-  }, [loadAll, quizGenerating])
+  }, [loadAll, question?.type, quizData])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
@@ -510,9 +521,7 @@ export function ParticipantPage() {
       ) : (
         <section className="panel participant-question quiz-loading-panel" aria-live="polite">
           <h2>{locale === 'en' ? 'Custom quiz' : '自訂測驗'}</h2>
-          <p className={quizLoadError ? 'error' : 'muted'}>{quizLoadError || (quizGenerating
-            ? (locale === 'en' ? 'Preparing questions, please wait…' : '出題中，請稍候')
-            : (locale === 'en' ? 'Loading questions…' : '正在載入題目…'))}</p>
+          <p className={quizLoadError ? 'error' : 'muted'}>{quizLoadError || (locale === 'en' ? 'Preparing questions, please wait…' : '出題中，請稍候')}</p>
           {quizLoadError && <button type="button" onClick={() => void loadAll()}>{locale === 'en' ? 'Try again' : '重新載入'}</button>}
         </section>
       )) : <ParticipantQuestionView
