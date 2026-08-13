@@ -141,7 +141,6 @@ Deno.serve(async (req) => {
 
     const geminiKey = Deno.env.get('GEMINI_API_KEY')
     const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
-    const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-2.5-flash'
     if (!geminiKey) return jsonResponse({ message: 'Supabase 尚未設定 GEMINI_API_KEY。' }, 503)
 
     const imageResponse = await fetch(screenshot.public_url)
@@ -164,25 +163,25 @@ Deno.serve(async (req) => {
         }],
       }
 
-    function requestBodyForModel(requestModel: string) {
-      const generationConfig = requestModel.startsWith('gemini-2.5')
-        ? { responseMimeType: 'application/json', responseSchema: analysisSchema }
-        : { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: analysisSchema } } }
+    function requestBodyForModel() {
+      // responseFormat uses JSON Schema on Gemini 3.x and Gemini 2.5. The
+      // legacy responseSchema field uses a restricted dialect and rejects
+      // keywords such as additionalProperties and nullable type arrays.
+      const generationConfig = { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: analysisSchema } } }
       return JSON.stringify({ ...requestPayload, generationConfig })
     }
 
     let geminiResponse: Response | null = null
     let requestError: unknown = null
     for (let attempt = 0; attempt < 3; attempt += 1) {
-      const requestModel = attempt === 0 ? model : fallbackModel
       try {
-        geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel)}:generateContent`, {
+        geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
           method: 'POST',
           headers: {
             'x-goog-api-key': geminiKey,
             'Content-Type': 'application/json',
           },
-          body: requestBodyForModel(requestModel),
+          body: requestBodyForModel(),
           signal: AbortSignal.timeout(35_000),
         })
         if (geminiResponse.ok || ![408, 429, 500, 502, 503, 504].includes(geminiResponse.status) || attempt === 2) break

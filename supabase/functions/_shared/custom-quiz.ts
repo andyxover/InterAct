@@ -105,7 +105,6 @@ export async function generateCustomQuiz(input: {
 }) {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
-  const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-2.5-flash'
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
 
   const imageResponse = await fetch(input.screenshotUrl)
@@ -143,22 +142,22 @@ export async function generateCustomQuiz(input: {
     }],
   }
 
-  function requestBodyForModel(requestModel: string) {
-    const generationConfig = requestModel.startsWith('gemini-2.5')
-      ? { responseMimeType: 'application/json', responseSchema: quizGenerationSchema }
-      : { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } }
+  function requestBodyForModel() {
+    // The current Generate Content API accepts JSON Schema through
+    // responseFormat for both Gemini 3.x and Gemini 2.5. responseSchema is a
+    // different, restricted schema dialect and rejects JSON Schema keywords.
+    const generationConfig = { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } }
     return JSON.stringify({ ...requestPayload, generationConfig })
   }
 
   let response: Response | null = null
   let requestError: unknown = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
-    const requestModel = attempt === 0 ? model : fallbackModel
     try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel)}:generateContent`, {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
         method: 'POST',
         headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: requestBodyForModel(requestModel),
+        body: requestBodyForModel(),
         signal: AbortSignal.timeout(35_000),
       })
       if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
