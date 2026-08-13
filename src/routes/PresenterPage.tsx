@@ -679,6 +679,7 @@ export function PresenterPage() {
           captionDisplayLanguage: settings.displayLanguage,
           captionFontSize: settings.fontSize,
           captionFontBold: settings.fontBold,
+          captionPosition: settings.position,
           interpretationAudioEnabled: settings.interpretationAudioEnabled,
           interpretationLanguages: settings.interpretationLanguages,
         },
@@ -1401,6 +1402,7 @@ export function PresenterPage() {
         <LiveCaptionOverlay
           fontBold={session.caption_font_bold}
           fontSize={session.caption_font_size}
+          position={session.caption_position}
           status={session.caption_status}
           text={liveCaptions[session.caption_display_language] || ''}
         />

@@ -221,6 +221,7 @@ export function DesktopOverlayPage() {
         <LiveCaptionOverlay
           fontBold={session.caption_font_bold}
           fontSize={session.caption_font_size}
+          position={session.caption_position}
           status={session.caption_status}
           text={liveCaptions[session.caption_display_language] || ''}
         />

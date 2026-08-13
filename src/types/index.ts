@@ -18,6 +18,7 @@ export type Session = {
   caption_display_language: string
   caption_font_size: number
   caption_font_bold: boolean
+  caption_position: 'top' | 'center' | 'bottom'
   caption_started_at: string | null
   interpretation_enabled: boolean
   interpretation_audio_enabled: boolean
