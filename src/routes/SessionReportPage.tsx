@@ -124,7 +124,46 @@ export function SessionReportPage() {
       const presenterToken = getPresenterToken(sessionId)
       if (!presenterToken) throw new Error('找不到這個場次的講者權限，無法產生課堂報告。')
 
-      const { data, error: functionError } = await requireSupabase().functions.invoke('analyze-session', {
+      const supabase = requireSupabase()
+      const [questionResult, answerResult, analysisResult] = await Promise.all([
+        supabase
+          .from('questions')
+          .select('id, type, status, screenshot_id')
+          .eq('session_id', sessionId),
+        supabase
+          .from('answers')
+          .select('question_id')
+          .eq('session_id', sessionId),
+        supabase
+          .from('ai_summaries')
+          .select('question_id')
+          .eq('session_id', sessionId)
+          .eq('type', 'question_analysis')
+          .eq('status', 'success'),
+      ])
+      if (questionResult.error) throw questionResult.error
+      if (answerResult.error) throw answerResult.error
+      if (analysisResult.error) throw analysisResult.error
+
+      const answeredQuestionIds = new Set((answerResult.data || []).map((answer) => answer.question_id))
+      const analyzedQuestionIds = new Set((analysisResult.data || []).map((summary) => summary.question_id))
+      const missingAnalyses = (questionResult.data || []).filter((question) =>
+        question.status !== 'active'
+        && Boolean(question.screenshot_id)
+        && !['send_screen', 'custom_quiz'].includes(question.type)
+        && answeredQuestionIds.has(question.id)
+        && !analyzedQuestionIds.has(question.id),
+      )
+
+      // Repair older sessions and transient AI failures before building the
+      // session analysis and Excel workbook.
+      for (const question of missingAnalyses) {
+        await supabase.functions.invoke('analyze-question', {
+          body: { sessionId, questionId: question.id, presenterToken },
+        })
+      }
+
+      const { data, error: functionError } = await supabase.functions.invoke('analyze-session', {
         body: { sessionId, presenterToken },
       })
       if (functionError) throw new Error(await edgeFunctionMessage(functionError))

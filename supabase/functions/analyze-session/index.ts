@@ -129,7 +129,7 @@ Deno.serve(async (req) => {
       .order('created_at', { ascending: false })
       .limit(1)
       .maybeSingle()
-    if (cached?.input_json?.analysis_version === 7) {
+    if (cached?.input_json?.analysis_version === 8) {
       return jsonResponse({ analysis: cached.output_json, metrics: cached.input_json?.metrics, cached: true })
     }
 
@@ -291,7 +291,7 @@ Deno.serve(async (req) => {
     }
 
     summaryInput = {
-      analysis_version: 7,
+      analysis_version: 8,
       session: {
         title: session.title,
         created_at: session.created_at,

@@ -27,6 +27,19 @@ import { participantLocaleFromStorage, participantText } from '../lib/participan
 import type { ParticipantLocale } from '../lib/participantI18n'
 import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, ParticipantQuizData, Question, Screenshot, Session, SessionAnalysis, SessionEvent, SharedContent } from '../types'
 
+async function participantFunctionMessage(error: unknown, fallback: string) {
+  const context = (error as { context?: Response } | null)?.context
+  if (context) {
+    try {
+      const payload = await context.clone().json() as { message?: unknown }
+      if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim()
+    } catch {
+      // Use the localized fallback for non-JSON gateway errors.
+    }
+  }
+  return fallback
+}
+
 export function ParticipantPage() {
   const { sessionId = '' } = useParams()
   const participantId = localStorage.getItem(`interact_participant_${sessionId}`)
@@ -134,7 +147,10 @@ export function ParticipantPage() {
         if (requestId !== loadSequence.current) return
         if (quizError) {
           setQuizData(null)
-          setQuizLoadError(locale === 'en' ? 'Unable to load this quiz. Please refresh or scan the QR code again.' : '無法載入測驗，請重新整理；若仍無法顯示，請重新掃描 QR Code 加入。')
+          setQuizLoadError(await participantFunctionMessage(
+            quizError,
+            locale === 'en' ? 'Unable to load this quiz. Please refresh or scan the QR code again.' : '無法載入測驗，請重新整理；若仍無法顯示，請重新掃描 QR Code 加入。',
+          ))
         } else if (loadedQuiz?.generating) {
           setQuizData(null)
         } else {
