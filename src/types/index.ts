@@ -338,6 +338,7 @@ export type PresenterQuizResults = ParticipantQuizData & {
   attempts: QuizAttempt[]
   answers: QuizItemAnswer[]
   keys: Array<{ item_id: string; accepted_answers: string[]; rubric: string }>
+  screenshot: Screenshot | null
 }
 
 export type AiSummary = {

@@ -1035,6 +1035,25 @@ export function PresenterPage() {
     }
   }
 
+  async function updateCustomQuizAnswer(itemId: string, acceptedAnswers: string[]) {
+    if (!question || question.type !== 'custom_quiz') return
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) throw new Error('這個舊場次沒有講者修改答案的權限。')
+    const { data, error } = await requireSupabase().functions.invoke('presenter-action', {
+      body: {
+        action: 'update_custom_quiz_key',
+        sessionId,
+        presenterToken,
+        questionId: question.id,
+        itemId,
+        acceptedAnswers,
+      },
+    })
+    if (error) throw new Error(await edgeFunctionErrorMessage(error, '正確答案更新失敗。'))
+    if (!data?.success) throw new Error(data?.message || '正確答案更新失敗。')
+    await loadAll()
+  }
+
   async function generateExitTicket() {
     if (session?.exit_ticket_prompt) return
     const presenterToken = getPresenterToken(sessionId)
@@ -1350,6 +1369,7 @@ export function PresenterPage() {
             onlineCount={onlineParticipants.length}
             question={question}
             results={quizResults}
+            onUpdateAnswer={updateCustomQuizAnswer}
           />
         ) : <QuestionResult
           anonymousEnabled={session.anonymous_enabled}
