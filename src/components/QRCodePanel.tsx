@@ -6,7 +6,7 @@ type Props = {
   joinUrl: string
   onClose?: () => void
   onMinimize?: () => void
-  qrInteractionProps?: Pick<HTMLAttributes<HTMLDivElement>, 'onPointerCancel' | 'onPointerDown' | 'onPointerUp'>
+  qrInteractionProps?: Pick<HTMLAttributes<HTMLDivElement>, 'onDoubleClick'>
 }
 
 export function QRCodePanel({ joinUrl, onClose, onMinimize, qrInteractionProps }: Props) {
