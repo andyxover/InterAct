@@ -298,8 +298,6 @@ Deno.serve(async (req) => {
       }
 
       const { data: publicData } = supabase.storage.from('interact-screenshots').getPublicUrl(storagePath)
-      const { data: previousSession } = await supabase.from('sessions').select('current_question_id').eq('id', sessionId).single()
-      const previousQuestionId = previousSession?.current_question_id || null
       const stoppedAt = new Date().toISOString()
       const { error: stopError } = await supabase.from('questions')
         .update({ status: 'stopped', stopped_at: stoppedAt })
@@ -317,7 +315,7 @@ Deno.serve(async (req) => {
 
       const questionId = crypto.randomUUID()
       const quizId = crypto.randomUUID()
-      const { error: questionError } = await supabase.from('questions').insert({
+      const { data: pendingQuestion, error: questionError } = await supabase.from('questions').insert({
         id: questionId,
         session_id: sessionId,
         screenshot_id: screenshotId,
@@ -335,65 +333,74 @@ Deno.serve(async (req) => {
         .update({ current_question_id: questionId }).eq('id', sessionId).eq('status', 'active')
       if (sessionError) throw sessionError
 
-      try {
-        const generated = await generateCustomQuiz({
-          screenshotUrl: publicData.publicUrl,
-          direction,
-          requestedCount,
-          requestedType: requestedType as 'random' | 'multiple_choice' | 'fill_blank' | 'short_answer',
-        })
+      const generateInBackground = async () => {
+        try {
+          const generated = await generateCustomQuiz({
+            screenshotUrl: publicData.publicUrl,
+            direction,
+            requestedCount,
+            requestedType: requestedType as 'random' | 'multiple_choice' | 'fill_blank' | 'short_answer',
+          })
 
-        const { error: screenshotUpdateError } = await supabase.from('screenshots').update({
-          ai_status: 'success',
-          screen_summary: { quiz_title: generated.title, item_count: generated.items.length },
-        }).eq('id', screenshotId)
-        if (screenshotUpdateError) throw screenshotUpdateError
+          const { error: screenshotUpdateError } = await supabase.from('screenshots').update({
+            ai_status: 'success',
+            screen_summary: { quiz_title: generated.title, item_count: generated.items.length },
+          }).eq('id', screenshotId)
+          if (screenshotUpdateError) throw screenshotUpdateError
 
-        const { error: quizError } = await supabase.from('quizzes').insert({
-          id: quizId,
-          session_id: sessionId,
-          question_id: questionId,
-          title: generated.title,
-          direction,
-          requested_count: requestedCount,
-          requested_type: requestedType,
-        })
-        if (quizError) throw quizError
+          const { error: quizError } = await supabase.from('quizzes').insert({
+            id: quizId,
+            session_id: sessionId,
+            question_id: questionId,
+            title: generated.title,
+            direction,
+            requested_count: requestedCount,
+            requested_type: requestedType,
+          })
+          if (quizError) throw quizError
 
-        const { error: itemError } = await supabase.from('quiz_items').insert(generated.items.map((item) => ({
-          id: item.id,
-          quiz_id: quizId,
-          position: item.position,
-          type: item.type,
-          prompt_text: item.prompt_text,
-          options: item.options,
-          points: item.points,
-          translations: item.translations,
-        })))
-        if (itemError) throw itemError
+          const { error: itemError } = await supabase.from('quiz_items').insert(generated.items.map((item) => ({
+            id: item.id,
+            quiz_id: quizId,
+            position: item.position,
+            type: item.type,
+            prompt_text: item.prompt_text,
+            options: item.options,
+            points: item.points,
+            translations: item.translations,
+          })))
+          if (itemError) throw itemError
 
-        const { error: keyError } = await supabase.from('quiz_item_keys').insert(generated.items.map((item) => ({
-          item_id: item.id,
-          accepted_answers: item.accepted_answers,
-          rubric: item.rubric,
-        })))
-        if (keyError) throw keyError
+          const { error: keyError } = await supabase.from('quiz_item_keys').insert(generated.items.map((item) => ({
+            item_id: item.id,
+            accepted_answers: item.accepted_answers,
+            rubric: item.rubric,
+          })))
+          if (keyError) throw keyError
 
-        const { data: question, error: questionUpdateError } = await supabase.from('questions').update({
-          title: generated.title,
-          translations: { en: { title: 'AI custom quiz', prompt_text: direction, options: [] } },
-        }).eq('id', questionId).select('*').single()
-        if (questionUpdateError) throw questionUpdateError
-        return jsonResponse({ question, quizId })
-      } catch (error) {
-        await supabase.from('sessions').update({ current_question_id: previousQuestionId }).eq('id', sessionId).eq('current_question_id', questionId)
-        await supabase.from('questions').delete().eq('id', questionId)
-        await supabase.from('screenshots').delete().eq('id', screenshotId)
-        if (previousQuestionId) {
-          await supabase.from('questions').update({ status: 'active', stopped_at: null }).eq('id', previousQuestionId).eq('session_id', sessionId)
+          const { error: questionUpdateError } = await supabase.from('questions').update({
+            title: generated.title,
+            translations: { en: { title: 'AI custom quiz', prompt_text: direction, options: [] } },
+          }).eq('id', questionId)
+          if (questionUpdateError) throw questionUpdateError
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : 'AI quiz generation failed.'
+          console.error('custom quiz generation failed', detail)
+          await Promise.all([
+            supabase.from('screenshots').update({
+              ai_status: 'failed',
+              screen_summary: { error: detail.slice(0, 500) },
+            }).eq('id', screenshotId),
+            supabase.from('questions').update({
+              title: '出題失敗，請重新派送',
+              translations: { en: { title: 'Question generation failed. Please send it again.', prompt_text: direction, options: [] } },
+            }).eq('id', questionId),
+          ])
         }
-        throw error
       }
+
+      EdgeRuntime.waitUntil(generateInBackground())
+      return jsonResponse({ question: pendingQuestion, quizId, generating: true }, 202)
     }
 
     if (action === 'get_session_custom_quiz_results') {
@@ -435,7 +442,18 @@ Deno.serve(async (req) => {
       const { data: quiz, error: quizError } = await supabase.from('quizzes').select('*')
         .eq('question_id', questionId).eq('session_id', sessionId).maybeSingle()
       if (quizError) throw quizError
-      if (!quiz) return jsonResponse({ message: '找不到自訂測驗。' }, 404)
+      if (!quiz) {
+        const { data: pendingQuestion, error: pendingError } = await supabase.from('questions').select('title')
+          .eq('id', questionId).eq('session_id', sessionId).maybeSingle()
+        if (pendingError) throw pendingError
+        if (pendingQuestion?.title === '出題失敗，請重新派送') {
+          return jsonResponse({ message: 'AI 出題暫時失敗，請重新派送。', generating: false }, 503)
+        }
+        if (pendingQuestion) {
+          return jsonResponse({ generating: true, quiz: null, items: [], attempts: [], answers: [], keys: [], screenshot: null }, 202)
+        }
+        return jsonResponse({ message: '找不到自訂測驗。' }, 404)
+      }
       const [{ data: items, error: itemError }, { data: attempts, error: attemptError }, { data: question, error: questionError }] = await Promise.all([
         supabase.from('quiz_items').select('*').eq('quiz_id', quiz.id).order('position'),
         supabase.from('quiz_attempts').select('*').eq('quiz_id', quiz.id).order('submitted_at'),

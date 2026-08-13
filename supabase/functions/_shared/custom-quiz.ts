@@ -93,6 +93,10 @@ function wait(milliseconds: number) {
   return new Promise((resolve) => setTimeout(resolve, milliseconds))
 }
 
+function retryDelay(attempt: number) {
+  return 900 * (2 ** attempt) + Math.floor(Math.random() * 400)
+}
+
 export async function generateCustomQuiz(input: {
   screenshotUrl: string
   direction: string
@@ -101,6 +105,7 @@ export async function generateCustomQuiz(input: {
 }) {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
+  const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-2.5-flash'
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
 
   const imageResponse = await fetch(input.screenshotUrl)
@@ -123,7 +128,7 @@ export async function generateCustomQuiz(input: {
     ? '題目、選項、答案與評分準則必須使用教師在出題方向中指定的語言；若未指定，使用出題方向與教材的主要語言。'
     : `教師已指定測驗語言為 ${requestedLanguage}；題目標題、題幹、選項、答案與評分準則都必須使用 ${requestedLanguage}。`
 
-  const requestBody = JSON.stringify({
+  const requestPayload = {
     systemInstruction: {
       parts: [{
         text: `你是 InterAct 的測驗設計助理。請根據教師截圖和出題方向建立適合課堂即時作答的測驗。${languageInstruction} translation_en 一律提供忠實自然的英文版本；若主文已是英文則保持相同意思。${countInstruction}${typeInstruction} 選擇題須有 2 至 6 個互不重複的選項，accepted_answers 只能包含正確選項原文。填充題請在題幹使用 ____ 標示作答處，accepted_answers 提供可接受答案與常見同義答案。簡答題提供參考答案於 accepted_answers，並在 rubric 寫出具體評分準則。不得捏造截圖無法支持的專有事實；若截圖資訊有限，應依教師的出題方向設計可合理回答的理解題。`,
@@ -136,18 +141,25 @@ export async function generateCustomQuiz(input: {
         { inlineData: { mimeType, data: imageBase64 } },
       ],
     }],
-    generationConfig: { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } },
-  })
+  }
+
+  function requestBodyForModel(requestModel: string) {
+    const generationConfig = requestModel.startsWith('gemini-2.5')
+      ? { responseMimeType: 'application/json', responseSchema: quizGenerationSchema }
+      : { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } }
+    return JSON.stringify({ ...requestPayload, generationConfig })
+  }
 
   let response: Response | null = null
   let requestError: unknown = null
   for (let attempt = 0; attempt < 3; attempt += 1) {
+    const requestModel = attempt === 0 ? model : fallbackModel
     try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel)}:generateContent`, {
         method: 'POST',
         headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-        body: requestBody,
-        signal: AbortSignal.timeout(60_000),
+        body: requestBodyForModel(requestModel),
+        signal: AbortSignal.timeout(35_000),
       })
       if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
       await response.body?.cancel()
@@ -155,7 +167,7 @@ export async function generateCustomQuiz(input: {
       requestError = error
       if (attempt === 2) break
     }
-    await wait(800 * (attempt + 1))
+    await wait(retryDelay(attempt))
   }
 
   if (!response) {

@@ -94,7 +94,7 @@ Deno.serve(async (req) => {
       const questionId = typeof input.questionId === 'string' ? input.questionId : ''
       if (!validUuid(questionId)) return jsonResponse({ message: '測驗資料格式不正確。' }, 400)
       const { data: question, error: questionError } = await supabase.from('questions')
-        .select('id, session_id, status, type').eq('id', questionId).eq('session_id', sessionId).maybeSingle()
+        .select('id, session_id, status, type, title').eq('id', questionId).eq('session_id', sessionId).maybeSingle()
       if (questionError) throw questionError
       if (!question || question.type !== 'custom_quiz') return jsonResponse({ message: '找不到自訂測驗。' }, 404)
       const { data: quiz, error: quizError } = await supabase.from('quizzes').select('*')
@@ -102,6 +102,9 @@ Deno.serve(async (req) => {
       if (quizError) throw quizError
 
       if (action === 'get_custom_quiz') {
+        if (!quiz && question.title === '出題失敗，請重新派送') {
+          return jsonResponse({ message: 'AI 出題暫時失敗，請等待教師重新派送。' }, 503)
+        }
         if (!quiz) return jsonResponse({ generating: true })
         const [{ data: items, error: itemError }, { data: attempt, error: attemptError }] = await Promise.all([
           supabase.from('quiz_items').select('*').eq('quiz_id', quiz.id).order('position'),

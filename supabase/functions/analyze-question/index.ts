@@ -65,6 +65,10 @@ function extractGeminiText(response: Record<string, unknown>) {
   return firstCandidate?.content?.parts?.map((part) => part.text || '').join('') || ''
 }
 
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 Deno.serve(async (req) => {
   if (req.method === 'OPTIONS') return new Response('ok', { headers: corsHeaders })
   if (req.method !== 'POST') return jsonResponse({ message: 'Method not allowed.' }, 405)
@@ -137,6 +141,7 @@ Deno.serve(async (req) => {
 
     const geminiKey = Deno.env.get('GEMINI_API_KEY')
     const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
+    const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-2.5-flash'
     if (!geminiKey) return jsonResponse({ message: 'Supabase 尚未設定 GEMINI_API_KEY。' }, 503)
 
     const imageResponse = await fetch(screenshot.public_url)
@@ -144,13 +149,7 @@ Deno.serve(async (req) => {
     const mimeType = imageResponse.headers.get('content-type') || 'image/png'
     const imageBase64 = bytesToBase64(new Uint8Array(await imageResponse.arrayBuffer()))
 
-    const geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-      method: 'POST',
-      headers: {
-        'x-goog-api-key': geminiKey,
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
+    const requestPayload = {
         systemInstruction: {
           parts: [{
             text: '你是 InterAct 的課堂形成性評量分析助理。請以繁體中文分析截圖中的題目與匿名化群體作答。若 presenter_question 有內容，detected_question 應優先忠實使用該題目；若為空，截圖有明確題幹時忠實轉寫或精簡，沒有明顯題幹時依畫面脈絡與選項產生中立、不誘導且不暗示正解的題目。無論是否有 presenter_question，都必須繼續根據截圖、選項及實際作答行為分析理解、證據、常見誤解與教學行動，不可只依題目文字推測。選擇題與是非題只能提出建議答案，最後決定權屬於講者。投票題不判定對錯。',
@@ -163,16 +162,42 @@ Deno.serve(async (req) => {
             { inlineData: { mimeType, data: imageBase64 } },
           ],
         }],
-        generationConfig: {
-          responseFormat: {
-            text: {
-              mimeType: 'APPLICATION_JSON',
-              schema: analysisSchema,
-            },
+      }
+
+    function requestBodyForModel(requestModel: string) {
+      const generationConfig = requestModel.startsWith('gemini-2.5')
+        ? { responseMimeType: 'application/json', responseSchema: analysisSchema }
+        : { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: analysisSchema } } }
+      return JSON.stringify({ ...requestPayload, generationConfig })
+    }
+
+    let geminiResponse: Response | null = null
+    let requestError: unknown = null
+    for (let attempt = 0; attempt < 3; attempt += 1) {
+      const requestModel = attempt === 0 ? model : fallbackModel
+      try {
+        geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(requestModel)}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': geminiKey,
+            'Content-Type': 'application/json',
           },
-        },
-      }),
-    })
+          body: requestBodyForModel(requestModel),
+          signal: AbortSignal.timeout(35_000),
+        })
+        if (geminiResponse.ok || ![408, 429, 500, 502, 503, 504].includes(geminiResponse.status) || attempt === 2) break
+        await geminiResponse.body?.cancel()
+      } catch (error) {
+        requestError = error
+        geminiResponse = null
+        if (attempt === 2) break
+      }
+      await wait(900 * (2 ** attempt) + Math.floor(Math.random() * 400))
+    }
+
+    if (!geminiResponse) {
+      throw new Error(requestError instanceof Error ? requestError.message : 'Gemini request failed.')
+    }
 
     if (!geminiResponse.ok) {
       const detail = (await geminiResponse.text()).slice(0, 1000)
