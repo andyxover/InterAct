@@ -1725,6 +1725,22 @@ h2 {
   padding: 12px 14px;
 }
 
+.quiz-choice-list input[type='radio'] {
+  accent-color: var(--primary);
+  flex: 0 0 20px;
+  height: 20px;
+  min-height: 20px;
+  margin: 0;
+  padding: 0;
+  width: 20px;
+}
+
+.quiz-choice-list label > span {
+  flex: 1 1 auto;
+  line-height: 1.45;
+  min-width: 0;
+}
+
 .quiz-choice-list label.selected {
   background: var(--primary-soft);
   border-color: var(--primary);
