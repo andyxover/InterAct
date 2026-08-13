@@ -63,6 +63,7 @@
     "win": {
       "icon": "build/icon.ico",
       "executableName": "InterActPlus",
+      "requestedExecutionLevel": "asInvoker",
       "target": [
         {
           "target": "portable",
@@ -73,9 +74,15 @@
       ]
     },
     "nsis": {
+      "allowElevation": false,
       "installerIcon": "build/icon.ico",
       "installerHeaderIcon": "build/icon.ico",
+      "packElevateHelper": false,
+      "perMachine": false,
       "uninstallerIcon": "build/icon.ico"
+    },
+    "portable": {
+      "requestExecutionLevel": "user"
     }
   }
 }
