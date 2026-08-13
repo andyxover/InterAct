@@ -416,10 +416,10 @@ ipcMain.handle('window:presenter-mode', (_event, sessionId) => {
   createOverlayWindow(sessionId)
 })
 
-ipcMain.handle('window:set-expanded', (_event, expanded, settingsOpen = false) => {
+ipcMain.handle('window:set-expanded', (_event, expanded, settingsOpen = false, interactiveOpen = false) => {
   // Reapplying always-on-top closes native Windows select popups. Temporarily
   // suspend the presenter topmost reinforcement while settings are interactive.
-  setPresenterTopmost(!settingsOpen)
+  setPresenterTopmost(!(settingsOpen || interactiveOpen))
   setControlBounds(Boolean(expanded), false, settingsOpen)
 })
 

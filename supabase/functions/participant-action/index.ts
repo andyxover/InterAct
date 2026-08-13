@@ -1,6 +1,9 @@
 import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { analyzeAudioResponse, removeRecording } from '../_shared/audio-analysis.ts'
+import { gradeCustomQuizAttempt } from '../_shared/custom-quiz.ts'
 import { getAdminClient, hashParticipantToken } from '../_shared/supabase.ts'
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
@@ -84,6 +87,128 @@ Deno.serve(async (req) => {
     const sessionId = typeof input.sessionId === 'string' ? input.sessionId : ''
     const participantId = typeof input.participantId === 'string' ? input.participantId : ''
     const participantToken = typeof input.participantToken === 'string' ? input.participantToken : ''
+
+    if (['get_custom_quiz', 'submit_custom_quiz', 'retry_custom_quiz_grading'].includes(action)) {
+      const participant = await verifyParticipant(supabase, sessionId, participantId, participantToken)
+      if (!participant) return jsonResponse({ message: '學員權限失效，請重新掃描 QR Code 加入場次。' }, 403)
+      const questionId = typeof input.questionId === 'string' ? input.questionId : ''
+      if (!validUuid(questionId)) return jsonResponse({ message: '測驗資料格式不正確。' }, 400)
+      const { data: question, error: questionError } = await supabase.from('questions')
+        .select('id, session_id, status, type').eq('id', questionId).eq('session_id', sessionId).maybeSingle()
+      if (questionError) throw questionError
+      if (!question || question.type !== 'custom_quiz') return jsonResponse({ message: '找不到自訂測驗。' }, 404)
+      const { data: quiz, error: quizError } = await supabase.from('quizzes').select('*')
+        .eq('question_id', questionId).eq('session_id', sessionId).maybeSingle()
+      if (quizError) throw quizError
+
+      if (action === 'get_custom_quiz') {
+        if (!quiz) return jsonResponse({ generating: true })
+        const [{ data: items, error: itemError }, { data: attempt, error: attemptError }] = await Promise.all([
+          supabase.from('quiz_items').select('*').eq('quiz_id', quiz.id).order('position'),
+          supabase.from('quiz_attempts').select('*').eq('quiz_id', quiz.id).eq('participant_id', participantId).maybeSingle(),
+        ])
+        if (itemError || attemptError) throw itemError || attemptError
+        let answers: unknown[] = []
+        if (attempt) {
+          const { data, error } = await supabase.from('quiz_item_answers').select('*').eq('attempt_id', attempt.id)
+          if (error) throw error
+          answers = data || []
+        }
+        return jsonResponse({ quiz, items: items || [], attempt: attempt || null, answers })
+      }
+
+      if (!quiz) return jsonResponse({ message: '自訂測驗仍在出題中，請稍候。' }, 409)
+
+      const { data: activeSession, error: sessionError } = await supabase.from('sessions')
+        .select('status').eq('id', sessionId).maybeSingle()
+      if (sessionError) throw sessionError
+
+      if (action === 'retry_custom_quiz_grading') {
+        const { data: attempt, error: attemptError } = await supabase.from('quiz_attempts')
+          .update({ status: 'grading', error_message: null, graded_at: null })
+          .eq('quiz_id', quiz.id).eq('participant_id', participantId).eq('status', 'failed')
+          .select('*').maybeSingle()
+        if (attemptError) throw attemptError
+        if (!attempt) return jsonResponse({ message: '目前沒有可重新評分的作答。' }, 409)
+        EdgeRuntime.waitUntil(gradeCustomQuizAttempt(attempt.id))
+        return jsonResponse({ attempt })
+      }
+
+      if (activeSession?.status !== 'active' || question.status !== 'active') {
+        return jsonResponse({ message: '測驗已停止作答。' }, 409)
+      }
+      const submittedAnswers = Array.isArray(input.answers) ? input.answers : []
+      const { data: items, error: itemError } = await supabase.from('quiz_items').select('*')
+        .eq('quiz_id', quiz.id).order('position')
+      if (itemError) throw itemError
+      if (!items?.length || submittedAnswers.length !== items.length) {
+        return jsonResponse({ message: '請完成所有題目後再送出。' }, 400)
+      }
+      const submittedByItem = new Map<string, { itemId: string; answerText?: string; answerValues?: string[] }>()
+      for (const raw of submittedAnswers) {
+        if (!raw || typeof raw !== 'object') return jsonResponse({ message: '作答資料格式不正確。' }, 400)
+        const answer = raw as Record<string, unknown>
+        const itemId = typeof answer.itemId === 'string' ? answer.itemId : ''
+        if (!validUuid(itemId) || submittedByItem.has(itemId)) return jsonResponse({ message: '作答題號不正確。' }, 400)
+        const answerText = typeof answer.answerText === 'string' ? answer.answerText.trim().slice(0, 4000) : ''
+        const answerValues = Array.isArray(answer.answerValues)
+          ? [...new Set(answer.answerValues.filter((value): value is string => typeof value === 'string').map((value) => value.trim().slice(0, 500)).filter(Boolean))].slice(0, 6)
+          : []
+        submittedByItem.set(itemId, { itemId, answerText, answerValues })
+      }
+      for (const item of items) {
+        const submitted = submittedByItem.get(item.id)
+        if (!submitted) return jsonResponse({ message: '作答題目不完整。' }, 400)
+        if (item.type === 'multiple_choice') {
+          if (!submitted.answerValues?.length || submitted.answerValues.some((value) => !item.options.includes(value))) {
+            return jsonResponse({ message: `第 ${item.position} 題的選項不正確。` }, 400)
+          }
+        } else if (!submitted.answerText) {
+          return jsonResponse({ message: `請完成第 ${item.position} 題。` }, 400)
+        }
+      }
+
+      const attemptId = crypto.randomUUID()
+      const { data: attempt, error: attemptError } = await supabase.from('quiz_attempts').insert({
+        id: attemptId,
+        session_id: sessionId,
+        question_id: questionId,
+        quiz_id: quiz.id,
+        participant_id: participantId,
+        participant_name: participant.name,
+        status: 'grading',
+      }).select('*').single()
+      if (attemptError) {
+        if (attemptError.code === '23505') return jsonResponse({ message: '這份測驗已經送出，不能修改答案。' }, 409)
+        throw attemptError
+      }
+      try {
+        const { error: answerError } = await supabase.from('quiz_item_answers').insert(items.map((item) => {
+          const submitted = submittedByItem.get(item.id)!
+          return {
+            attempt_id: attemptId,
+            item_id: item.id,
+            answer_text: item.type === 'multiple_choice' ? null : submitted.answerText,
+            answer_values: item.type === 'multiple_choice' ? submitted.answerValues : null,
+          }
+        }))
+        if (answerError) throw answerError
+        const { error: placeholderError } = await supabase.from('answers').insert({
+          session_id: sessionId,
+          question_id: questionId,
+          participant_id: participantId,
+          participant_name: participant.name,
+          answer_text: '[自訂測驗評分中]',
+        })
+        if (placeholderError) throw placeholderError
+      } catch (error) {
+        await supabase.from('quiz_attempts').delete().eq('id', attemptId)
+        throw error
+      }
+
+      EdgeRuntime.waitUntil(gradeCustomQuizAttempt(attemptId))
+      return jsonResponse({ attempt })
+    }
 
     if (['prepare_recording_upload', 'submit_recording', 'get_recording_result'].includes(action)) {
       const participant = await verifyParticipant(supabase, sessionId, participantId, participantToken)

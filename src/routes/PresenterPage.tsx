@@ -10,8 +10,10 @@ import { QRCodePanel } from '../components/QRCodePanel'
 import { ExitTicketResult } from '../components/ExitTicketResult'
 import { LotteryOverlay } from '../components/LotteryOverlay'
 import { QuestionEditor } from '../components/QuestionEditor'
+import type { CustomQuizSettings } from '../components/QuestionEditor'
 import { QuestionHistory } from '../components/QuestionHistory'
 import { QuestionResult } from '../components/QuestionResult'
+import { CustomQuizResult } from '../components/CustomQuizResult'
 import { SetupNotice } from '../components/SetupNotice'
 import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
@@ -24,7 +26,7 @@ import { createInterpretationAudioBroadcaster } from '../lib/liveInterpretation'
 import { createCaptionTextNormalizer } from '../lib/traditionalChinese'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import { useSessionPresence } from '../lib/useSessionPresence'
-import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
+import type { AiSummary, Answer, AudioResponse, BuzzerSessionEvent, ExitTicket, LotterySessionEvent, Participant, PresenterQuizResults, Question, QuestionAnalysis, QuestionType, Session, SessionEvent } from '../types'
 import { useParams } from 'react-router-dom'
 import type { RealtimeChannel } from '@supabase/supabase-js'
 
@@ -63,6 +65,7 @@ export function PresenterPage() {
   const [audioResponses, setAudioResponses] = useState<AudioResponse[]>([])
   const [exitTickets, setExitTickets] = useState<ExitTicket[]>([])
   const [analysis, setAnalysis] = useState<QuestionAnalysis | null>(null)
+  const [quizResults, setQuizResults] = useState<PresenterQuizResults | null>(null)
   const [analysisBusy, setAnalysisBusy] = useState(false)
   const [analysisError, setAnalysisError] = useState('')
   const [endClassConfirmOpen, setEndClassConfirmOpen] = useState(false)
@@ -209,7 +212,17 @@ export function PresenterPage() {
       setAnswers((answerData || []) as Answer[])
       setAnalysis(((summaryData as AiSummary | null)?.output_json as QuestionAnalysis | undefined) || null)
       const loadedQuestion = questionData as Question | null
-      if (loadedQuestion && ['pronunciation', 'oral_response'].includes(loadedQuestion.type) && loadedQuestion.status !== 'active') {
+      if (loadedQuestion?.type === 'custom_quiz') {
+        const presenterToken = getPresenterToken(sessionId)
+        if (presenterToken) {
+          const { data: quizData } = await supabase.functions.invoke('presenter-action', {
+            body: { action: 'get_custom_quiz_results', sessionId, presenterToken, questionId: targetQuestionId },
+          })
+          setQuizResults((quizData as PresenterQuizResults | null) || null)
+        }
+        setAudioResponses([])
+      } else if (loadedQuestion && ['pronunciation', 'oral_response'].includes(loadedQuestion.type) && loadedQuestion.status !== 'active') {
+        setQuizResults(null)
         const presenterToken = getPresenterToken(sessionId)
         if (presenterToken) {
           const { data: recordingData } = await supabase.functions.invoke('presenter-action', {
@@ -218,12 +231,14 @@ export function PresenterPage() {
           setAudioResponses((recordingData?.responses || []) as AudioResponse[])
         }
       } else {
+        setQuizResults(null)
         setAudioResponses([])
       }
     } else {
       setQuestion(null)
       setAnswers([])
       setAudioResponses([])
+      setQuizResults(null)
       setAnalysis(null)
     }
   }, [selectedQuestionId, sessionId])
@@ -289,6 +304,7 @@ export function PresenterPage() {
     window.interactDesktop.setPresenterExpanded(
       controlsOpen || editorOpen || textDispatchOpen || settingsOpen || endClassConfirmOpen || closeConfirmOpen,
       settingsOpen,
+      editorOpen,
     )
   }, [closeConfirmOpen, controlsOpen, editorOpen, endClassConfirmOpen, selectionMode, settingsOpen, textDispatchOpen])
 
@@ -686,7 +702,7 @@ export function PresenterPage() {
     void interpretationAudioContextRef.current?.close()
   }, [clearCaptionDisplayTimers])
 
-  async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {
+  async function uploadQuestionScreenshot(file: File, type: QuestionType, options: string[], allowMultiple: boolean, promptText: string, quizSettings?: CustomQuizSettings) {
     const presenterToken = getPresenterToken(sessionId)
     if (!presenterToken) throw new Error('找不到講者權限，請重新加入場次。')
     setBusy(true)
@@ -714,7 +730,16 @@ export function PresenterPage() {
       if (uploadError) throw uploadError
 
       const { data, error } = await supabase.functions.invoke('presenter-action', {
-        body: {
+        body: type === 'custom_quiz' ? {
+          action: 'create_custom_quiz',
+          sessionId,
+          presenterToken,
+          screenshotId: prepared.screenshotId,
+          storagePath: prepared.storagePath,
+          direction: quizSettings?.direction || promptText,
+          requestedCount: quizSettings?.requestedCount ?? null,
+          requestedType: quizSettings?.requestedType || 'random',
+        } : {
           action: 'create_question',
           sessionId,
           presenterToken,
@@ -907,13 +932,13 @@ export function PresenterPage() {
     lastQrPressRef.current = { x: event.clientX, y: event.clientY, time: now }
   }
 
-  async function createScreenshotQuestion(type: QuestionType, options: string[], allowMultiple: boolean, promptText: string) {
+  async function createScreenshotQuestion(type: QuestionType, options: string[], allowMultiple: boolean, promptText: string, quizSettings?: CustomQuizSettings) {
     if (!captureFile) return
 
     setAnalysisError('')
     setEditorOpen(false)
     try {
-      await uploadQuestionScreenshot(captureFile, type, options, allowMultiple, promptText)
+      await uploadQuestionScreenshot(captureFile, type, options, allowMultiple, promptText, quizSettings)
       setCaptureFile(null)
       setCapturePreviewUrl(null)
     } catch (error) {
@@ -1306,7 +1331,13 @@ export function PresenterPage() {
           selectedQuestionId={selectedQuestionId}
           onSelect={selectQuestion}
         />
-        <QuestionResult
+        {question?.type === 'custom_quiz' ? (
+          <CustomQuizResult
+            onlineCount={onlineParticipants.length}
+            question={question}
+            results={quizResults}
+          />
+        ) : <QuestionResult
           anonymousEnabled={session.anonymous_enabled}
           analysis={analysis}
           analysisBusy={analysisBusy}
@@ -1320,7 +1351,7 @@ export function PresenterPage() {
           onAnalyze={analyzeQuestion}
           onDrawUnanswered={drawUnanswered}
           onSetCorrectAnswer={setCorrectAnswer}
-        />
+        />}
         {session.exit_ticket_prompt && session.exit_ticket_category && (
           <ExitTicketResult
             anonymousEnabled={session.anonymous_enabled}

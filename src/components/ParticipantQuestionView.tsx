@@ -25,7 +25,7 @@ export function ParticipantQuestionView({ question, answer, audioBusy, audioResp
     setSelectedOptions([])
   }, [question?.id])
 
-  if (!question || question.type === 'send_screen') return null
+  if (!question || question.type === 'send_screen' || question.type === 'custom_quiz') return null
   const isAudioQuestion = question.type === 'pronunciation' || question.type === 'oral_response'
   const translation = locale === 'en' ? question.translations?.en : undefined
   const englishTypeTitles: Partial<Record<Question['type'], string>> = {
