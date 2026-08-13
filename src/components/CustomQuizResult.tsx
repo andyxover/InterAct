@@ -11,7 +11,7 @@ type Props = {
   onUpdateAnswer: (itemId: string, acceptedAnswers: string[]) => Promise<void>
 }
 
-type QuizReviewProps = {
+export type QuizReviewProps = {
   busyItemId: string
   draftAnswers: Record<string, string>
   results: PresenterQuizResults
@@ -23,7 +23,7 @@ function acceptedAnswersFor(results: PresenterQuizResults, itemId: string) {
   return results.keys.find((key) => key.item_id === itemId)?.accepted_answers || []
 }
 
-function QuizAnswerEditor({ busyItemId, draftAnswers, results, onDraftChange, onUpdateAnswer }: QuizReviewProps) {
+export function QuizAnswerEditor({ busyItemId, draftAnswers, results, onDraftChange, onUpdateAnswer }: QuizReviewProps) {
   return (
     <div className="presenter-quiz-review-list">
       {results.items.map((item, index) => {
@@ -125,13 +125,21 @@ export function CustomQuizResult({ anonymousEnabled, question, results, onlineCo
     onUpdateAnswer: updateAnswer,
   }
 
+  function openExpandedReview() {
+    if (window.interactDesktop) {
+      void window.interactDesktop.openCustomQuizReview(question.session_id, question.id)
+      return
+    }
+    setExpanded(true)
+  }
+
   return (
     <section className="panel result-panel custom-quiz-result">
       <div className="result-heading">
         <div><p className="eyebrow"><BrainCircuit size={17} />自訂測驗</p><h2>{results.quiz.title || question.title}</h2></div>
         <div className="custom-quiz-heading-actions">
           <span>{results.attempts.length}/{onlineCount} 人作答</span>
-          <button aria-label="放大檢視測驗" className="icon-button" title="放大檢視測驗" type="button" onClick={() => setExpanded(true)}><Maximize2 size={20} /></button>
+          <button aria-label="放大檢視測驗" className="icon-button" title="放大檢視測驗" type="button" onClick={openExpandedReview}><Maximize2 size={20} /></button>
         </div>
       </div>
       <div className="quiz-result-stats">

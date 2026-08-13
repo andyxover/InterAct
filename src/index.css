@@ -1821,6 +1821,61 @@ h2 {
   margin-bottom: 12px;
 }
 
+.custom-quiz-native-page {
+  background: var(--background);
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
+  height: 100vh;
+  overflow: hidden;
+}
+
+.custom-quiz-native-page > header {
+  -webkit-app-region: drag;
+  align-items: flex-start;
+  background: var(--surface);
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 18px;
+  justify-content: space-between;
+  padding: 18px 22px;
+}
+
+.custom-quiz-native-page > header h1,
+.custom-quiz-native-page > header p {
+  margin: 0;
+}
+
+.custom-quiz-native-page > header h1 {
+  font-size: clamp(1.35rem, 2vw, 2rem);
+  margin-top: 4px;
+}
+
+.custom-quiz-native-page > header button {
+  -webkit-app-region: no-drag;
+}
+
+.custom-quiz-native-content {
+  display: grid;
+  gap: 20px;
+  grid-template-columns: minmax(320px, 0.85fr) minmax(440px, 1.15fr);
+  min-height: 0;
+  padding: 20px;
+}
+
+.custom-quiz-native-content .custom-quiz-source-panel,
+.custom-quiz-native-content .custom-quiz-question-panel {
+  background: var(--surface);
+}
+
+.custom-quiz-native-content h2 {
+  margin: 0 0 12px;
+}
+
+.custom-quiz-native-error,
+.custom-quiz-native-loading {
+  margin: 24px;
+}
+
 .quiz-attempt-list article,
 .quiz-graded-item,
 .custom-quiz-item {
@@ -3506,6 +3561,11 @@ h2 {
   }
 
   .custom-quiz-review-content {
+    grid-template-columns: 1fr;
+    overflow: auto;
+  }
+
+  .custom-quiz-native-content {
     grid-template-columns: 1fr;
     overflow: auto;
   }
