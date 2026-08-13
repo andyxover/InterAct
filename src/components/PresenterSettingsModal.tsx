@@ -9,6 +9,7 @@ export type PresenterCaptionSettings = {
   displayLanguage: string
   fontSize: number
   fontBold: boolean
+  position: 'top' | 'center' | 'bottom'
   interpretationAudioEnabled: boolean
   interpretationLanguages: string[]
 }
@@ -38,8 +39,9 @@ export function PresenterSettingsModal({
 }: Props) {
   const [sourceLanguage, setSourceLanguage] = useState(session.caption_source_language)
   const [displayLanguage, setDisplayLanguage] = useState(session.caption_display_language)
-  const [fontSize, setFontSize] = useState(session.caption_font_size ?? 42)
+  const [fontSize, setFontSize] = useState(session.caption_font_size ?? 36)
   const [fontBold, setFontBold] = useState(session.caption_font_bold ?? false)
+  const [position, setPosition] = useState(session.caption_position ?? 'bottom')
   const [interpretationAudioEnabled, setInterpretationAudioEnabled] = useState(session.interpretation_audio_enabled)
   const [interpretationLanguages, setInterpretationLanguages] = useState(session.interpretation_languages)
   const [microphoneId, setMicrophoneId] = useState(selectedMicrophoneId)
@@ -50,8 +52,9 @@ export function PresenterSettingsModal({
     if (!open) return
     setSourceLanguage(session.caption_source_language)
     setDisplayLanguage(session.caption_display_language)
-    setFontSize(session.caption_font_size ?? 42)
+    setFontSize(session.caption_font_size ?? 36)
     setFontBold(session.caption_font_bold ?? false)
+    setPosition(session.caption_position ?? 'bottom')
     setInterpretationAudioEnabled(session.interpretation_audio_enabled)
     setInterpretationLanguages(session.interpretation_languages)
     setMicrophoneId(selectedMicrophoneId)
@@ -117,7 +120,7 @@ export function PresenterSettingsModal({
 
   function submit(event: FormEvent) {
     event.preventDefault()
-    onSave({ sourceLanguage, displayLanguage, fontSize, fontBold, interpretationAudioEnabled, interpretationLanguages }, microphoneId)
+    onSave({ sourceLanguage, displayLanguage, fontSize, fontBold, position, interpretationAudioEnabled, interpretationLanguages }, microphoneId)
   }
 
   return (
@@ -172,7 +175,11 @@ export function PresenterSettingsModal({
                 setSourceLanguage(next)
                 setInterpretationLanguages(defaultInterpretationLanguages(next))
               }}>
-                {SPEAKER_LANGUAGES.map((language) => <option key={language.code} value={language.code}>{language.label}</option>)}
+                {SPEAKER_LANGUAGES.map((language) => (
+                  <option key={language.code} value={language.code}>
+                    {language.code === 'zh-tw' ? '字正腔圓' : language.label}
+                  </option>
+                ))}
               </select>
             </label>
             <label>
@@ -185,6 +192,14 @@ export function PresenterSettingsModal({
               字幕大小
               <select value={fontSize} onChange={(event) => setFontSize(Number(event.target.value))}>
                 {[32, 36, 42, 48, 56, 64, 72, 80].map((size) => <option key={size} value={size}>{size} px</option>)}
+              </select>
+            </label>
+            <label>
+              字幕位置
+              <select value={position} onChange={(event) => setPosition(event.target.value as PresenterCaptionSettings['position'])}>
+                <option value="top">螢幕上方</option>
+                <option value="bottom">螢幕下方</option>
+                <option value="center">螢幕置中</option>
               </select>
             </label>
           </div>

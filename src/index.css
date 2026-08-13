@@ -914,7 +914,6 @@ h2 {
   align-items: center;
   background: rgb(10 15 28 / 92%);
   border: 1px solid rgb(255 255 255 / 20%);
-  bottom: 18px;
   box-shadow: 0 12px 32px rgb(0 0 0 / 28%);
   color: #fff;
   display: flex;
@@ -925,9 +924,26 @@ h2 {
   padding: 14px 18px;
   pointer-events: none;
   position: fixed;
-  transform: translateX(-50%);
   width: max-content;
   z-index: 4;
+}
+
+.live-caption-overlay.caption-position-bottom {
+  bottom: 18px;
+  top: auto;
+  transform: translateX(-50%);
+}
+
+.live-caption-overlay.caption-position-top {
+  bottom: auto;
+  top: 18px;
+  transform: translateX(-50%);
+}
+
+.live-caption-overlay.caption-position-center {
+  bottom: auto;
+  top: 50%;
+  transform: translate(-50%, -50%);
 }
 
 .live-caption-language {
@@ -1006,7 +1022,6 @@ h2 {
   background: rgb(255 255 255 / 88%);
   border: 1px solid rgb(223 226 232 / 85%);
   border-radius: var(--radius-md);
-  bottom: 48px;
   box-shadow: var(--shadow-sm);
   color: var(--text);
   left: 50%;
@@ -1014,6 +1029,14 @@ h2 {
   padding: 12px 18px;
   width: max-content;
   z-index: 3;
+}
+
+.desktop-overlay-root .live-caption-overlay.caption-position-bottom {
+  bottom: 48px;
+}
+
+.desktop-overlay-root .live-caption-overlay.caption-position-top {
+  top: 48px;
 }
 
 .desktop-overlay-root .live-caption-language {

@@ -12,8 +12,8 @@ export const CAPTION_LANGUAGES = [
 ] as const
 
 export const SPEAKER_LANGUAGES = CAPTION_LANGUAGES.filter((language) => ['zh-tw', 'en'].includes(language.code))
-export const CAPTION_DISPLAY_LANGUAGES = CAPTION_LANGUAGES.filter((language) => ['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'].includes(language.code))
-export const INTERPRETATION_LANGUAGES = CAPTION_LANGUAGES.filter((language) => ['zh-tw', 'en', 'ja', 'ko', 'vi', 'id', 'th', 'es', 'de'].includes(language.code))
+export const CAPTION_DISPLAY_LANGUAGES = CAPTION_LANGUAGES.filter((language) => ['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th', 'fr'].includes(language.code))
+export const INTERPRETATION_LANGUAGES = CAPTION_LANGUAGES.filter((language) => ['zh-tw', 'en', 'ja', 'ko', 'vi', 'id', 'th', 'es', 'de', 'fr'].includes(language.code))
 export const DEFAULT_CAPTION_LANGUAGE = 'zh-tw'
 
 export function defaultInterpretationLanguages(sourceLanguage: string) {

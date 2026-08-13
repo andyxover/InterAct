@@ -6,8 +6,8 @@ type ParticipantRecord = { id: string; name: string }
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 const questionTypes = new Set(['send_screen', 'poll', 'multiple_choice', 'true_false', 'short_answer', 'pronunciation', 'oral_response'])
 const speakerLanguages = new Set(['zh-tw', 'en'])
-const captionDisplayLanguages = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
-const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
+const captionDisplayLanguages = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th', 'fr'])
+const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th', 'fr'])
 const questionTranslationSchema = {
   type: 'object',
   additionalProperties: false,
@@ -169,6 +169,7 @@ Deno.serve(async (req) => {
         input.captionDisplayLanguage,
         input.captionFontSize,
         input.captionFontBold,
+        input.captionPosition,
         input.interpretationAudioEnabled,
         input.interpretationLanguages,
       ].some((value) => value !== undefined)
@@ -197,6 +198,13 @@ Deno.serve(async (req) => {
           values.caption_font_size = captionFontSize
         }
         if (typeof input.captionFontBold === 'boolean') values.caption_font_bold = input.captionFontBold
+        if (input.captionPosition !== undefined) {
+          const captionPosition = typeof input.captionPosition === 'string' ? input.captionPosition : ''
+          if (!['top', 'center', 'bottom'].includes(captionPosition)) {
+            return jsonResponse({ message: '字幕位置不正確。' }, 400)
+          }
+          values.caption_position = captionPosition
+        }
         values.interpretation_enabled = interpretationAudioEnabled
         values.interpretation_audio_enabled = interpretationAudioEnabled
         values.interpretation_languages = interpretationAudioEnabled ? interpretationLanguages : []

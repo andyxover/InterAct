@@ -3,7 +3,7 @@ import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
 
 const codeAlphabet = 'ABCDEFGHJKLMNPQRSTUVWXYZ23456789'
 const speakerLanguages = new Set(['zh-tw', 'en'])
-const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th'])
+const interpretationLanguagesSupported = new Set(['zh-tw', 'en', 'es', 'ja', 'ko', 'vi', 'de', 'id', 'th', 'fr'])
 
 function normalizedLanguage(value: unknown, supported: Set<string>, fallback = 'zh-tw') {
   return typeof value === 'string' && supported.has(value) ? value : fallback
@@ -59,8 +59,9 @@ Deno.serve(async (req) => {
           captions_enabled: false,
           caption_source_language: sourceLanguage,
           caption_display_language: sourceLanguage,
-          caption_font_size: 42,
+          caption_font_size: 36,
           caption_font_bold: false,
+          caption_position: 'bottom',
           interpretation_enabled: interpretationAudioEnabled,
           interpretation_audio_enabled: interpretationAudioEnabled,
           interpretation_languages: interpretationAudioEnabled ? interpretationLanguages : [],
