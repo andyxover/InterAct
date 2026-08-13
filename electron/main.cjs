@@ -16,6 +16,7 @@ const TOPMOST_LEVEL = 'screen-saver'
 const CONTROL_RELATIVE_LEVEL = 6
 const OVERLAY_RELATIVE_LEVEL = 2
 const WORD_CLOUD_RELATIVE_LEVEL = 4
+const QUIZ_REVIEW_RELATIVE_LEVEL = 5
 
 app.setAppUserModelId(APP_USER_MODEL_ID)
 
@@ -50,6 +51,7 @@ let overlayKeepAliveTimer = null
 let overlayVisibilitySuppressed = false
 let reportWindow = null
 let wordCloudWindow = null
+let quizReviewWindow = null
 let lastControlBounds = null
 let isQuitting = false
 let latestLotteryEvent = null
@@ -126,6 +128,8 @@ function createWindow() {
     closeOverlayWindow()
     wordCloudWindow?.close()
     wordCloudWindow = null
+    quizReviewWindow?.close()
+    quizReviewWindow = null
   })
 }
 
@@ -359,6 +363,77 @@ function createWordCloudWindow(sessionId) {
   })
 }
 
+function createCustomQuizReviewWindow(sessionId, questionId) {
+  if (quizReviewWindow && !quizReviewWindow.isDestroyed()) {
+    loadAppRoute(quizReviewWindow, `/custom-quiz-review/${sessionId}/${questionId}`)
+    if (quizReviewWindow.isMinimized()) quizReviewWindow.restore()
+    quizReviewWindow.show()
+    quizReviewWindow.moveTop()
+    quizReviewWindow.focus()
+    return
+  }
+
+  const targetDisplay = displayForBounds(mainWindow?.getBounds())
+  const workArea = targetDisplay.workArea
+  const width = Math.max(800, Math.round(workArea.width * 0.8))
+  const height = Math.max(600, Math.round(workArea.height * 0.8))
+  const x = workArea.x + Math.round((workArea.width - width) / 2)
+  const y = workArea.y + Math.round((workArea.height - height) / 2)
+
+  overlayVisibilitySuppressed = true
+  overlayWindow?.hide()
+  mainWindow?.hide()
+
+  const nextQuizReviewWindow = new BrowserWindow({
+    x,
+    y,
+    width,
+    height,
+    minWidth: 760,
+    minHeight: 520,
+    frame: false,
+    show: false,
+    resizable: true,
+    maximizable: true,
+    alwaysOnTop: true,
+    backgroundColor: '#f7f8fb',
+    title: 'InterAct 自訂測驗檢視',
+    icon: APP_WINDOW_ICON_PATH,
+    webPreferences: {
+      contextIsolation: true,
+      nodeIntegration: false,
+      sandbox: true,
+      preload: path.join(__dirname, 'preload.cjs'),
+    },
+  })
+  quizReviewWindow = nextQuizReviewWindow
+  nextQuizReviewWindow.setAppDetails({
+    appId: APP_USER_MODEL_ID,
+    appIconPath: APP_RELAUNCH_ICON_PATH,
+    appIconIndex: 0,
+    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
+    relaunchDisplayName: 'InterAct',
+  })
+  configureWebContents(nextQuizReviewWindow)
+  nextQuizReviewWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, QUIZ_REVIEW_RELATIVE_LEVEL)
+  loadAppRoute(nextQuizReviewWindow, `/custom-quiz-review/${sessionId}/${questionId}`)
+  nextQuizReviewWindow.once('ready-to-show', () => {
+    nextQuizReviewWindow.show()
+    nextQuizReviewWindow.moveTop()
+    nextQuizReviewWindow.focus()
+  })
+  nextQuizReviewWindow.on('closed', () => {
+    if (quizReviewWindow === nextQuizReviewWindow) quizReviewWindow = null
+    overlayVisibilitySuppressed = false
+    showOverlayInactive()
+    if (mainWindow && !mainWindow.isDestroyed()) {
+      mainWindow.show()
+      mainWindow.moveTop()
+      mainWindow.focus()
+    }
+  })
+}
+
 function displayForBounds(bounds) {
   return screen.getDisplayMatching(bounds || mainWindow?.getBounds() || screen.getPrimaryDisplay().bounds)
 }
@@ -452,7 +527,7 @@ ipcMain.handle('window:minimize', (event) => {
 })
 ipcMain.handle('window:close', (event) => {
   const targetWindow = BrowserWindow.fromWebContents(event.sender)
-  if (targetWindow && targetWindow === wordCloudWindow) {
+  if (targetWindow && (targetWindow === wordCloudWindow || targetWindow === quizReviewWindow)) {
     targetWindow.close()
     return
   }
@@ -482,6 +557,11 @@ ipcMain.handle('window:return-from-session-report', async (event) => {
 ipcMain.handle('window:open-word-cloud', (_event, sessionId) => {
   requireUuid(sessionId)
   createWordCloudWindow(sessionId)
+})
+ipcMain.handle('window:open-custom-quiz-review', (_event, sessionId, questionId) => {
+  requireUuid(sessionId)
+  requireUuid(questionId, 'question')
+  createCustomQuizReviewWindow(sessionId, questionId)
 })
 
 ipcMain.handle('capture:list', listCaptureSources)
