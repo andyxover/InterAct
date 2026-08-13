@@ -120,7 +120,6 @@ export function ParticipantPage() {
       setAnswer((answerData as Answer | null) || null)
       if (nextQuestion?.type === 'custom_quiz') {
         if (loadedQuizQuestionId.current !== nextQuestion.id) setQuizData(null)
-        setQuizLoadError('')
       }
 
       if (nextQuestion && ['pronunciation', 'oral_response'].includes(nextQuestion.type) && participantToken) {
@@ -140,7 +139,6 @@ export function ParticipantPage() {
       }
 
       if (nextQuestion?.type === 'custom_quiz' && participantToken) {
-        setQuizLoadError('')
         const { data: loadedQuiz, error: quizError } = await supabase.functions.invoke('participant-action', {
           body: { action: 'get_custom_quiz', sessionId, participantId, participantToken, questionId: nextQuestion.id },
         })
@@ -153,9 +151,11 @@ export function ParticipantPage() {
           ))
         } else if (loadedQuiz?.generating) {
           setQuizData(null)
+          setQuizLoadError('')
         } else {
           loadedQuizQuestionId.current = nextQuestion.id
           setQuizData((loadedQuiz as ParticipantQuizData | null) || null)
+          setQuizLoadError('')
         }
       } else {
         loadedQuizQuestionId.current = ''
@@ -198,10 +198,10 @@ export function ParticipantPage() {
   }, [loadAll, quizData?.attempt?.status])
 
   useEffect(() => {
-    if (question?.type !== 'custom_quiz' || quizData) return
+    if (question?.type !== 'custom_quiz' || quizData || quizLoadError) return
     const timer = window.setInterval(() => void loadAll(), 1500)
     return () => window.clearInterval(timer)
-  }, [loadAll, question?.type, quizData])
+  }, [loadAll, question?.type, quizData, quizLoadError])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
