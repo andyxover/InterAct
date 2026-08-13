@@ -3,7 +3,7 @@ import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, 
 import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
-import type { AiSummary, Answer, AudioResponse, CaptionSegment, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionMetrics, SessionReportData, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, CaptionSegment, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionCustomQuizResults, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
@@ -90,10 +90,16 @@ export function SessionReportPage() {
 
     const presenterToken = getPresenterToken(sessionId)
     if (!presenterToken) throw new Error('找不到這個場次的講者權限，無法讀取錄音評測。')
-    const { data: recordingData, error: recordingError } = await supabase.functions.invoke('presenter-action', {
-      body: { action: 'get_session_recording_results', sessionId, presenterToken },
-    })
-    if (recordingError) throw new Error(await edgeFunctionMessage(recordingError))
+    const [recordingResult, customQuizResult] = await Promise.all([
+      supabase.functions.invoke('presenter-action', {
+        body: { action: 'get_session_recording_results', sessionId, presenterToken },
+      }),
+      supabase.functions.invoke('presenter-action', {
+        body: { action: 'get_session_custom_quiz_results', sessionId, presenterToken },
+      }),
+    ])
+    if (recordingResult.error) throw new Error(await edgeFunctionMessage(recordingResult.error))
+    if (customQuizResult.error) throw new Error(await edgeFunctionMessage(customQuizResult.error))
 
     setReportData({
       session: session as Session,
@@ -104,7 +110,8 @@ export function SessionReportPage() {
       screenshots,
       questions,
       answers,
-      audioResponses: (recordingData?.responses || []) as AudioResponse[],
+      audioResponses: (recordingResult.data?.responses || []) as AudioResponse[],
+      customQuizResults: customQuizResult.data as SessionCustomQuizResults,
       aiSummaries,
       exitTickets,
     })

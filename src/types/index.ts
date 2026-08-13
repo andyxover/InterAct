@@ -342,6 +342,14 @@ export type PresenterQuizResults = ParticipantQuizData & {
   screenshot: Screenshot | null
 }
 
+export type SessionCustomQuizResults = {
+  quizzes: Quiz[]
+  items: QuizItem[]
+  attempts: QuizAttempt[]
+  answers: QuizItemAnswer[]
+  keys: Array<{ item_id: string; accepted_answers: string[]; rubric: string }>
+}
+
 export type AiSummary = {
   id: string
   session_id: string
@@ -378,6 +386,7 @@ export type SessionReportData = {
   questions: Question[]
   answers: Answer[]
   audioResponses: AudioResponse[]
+  customQuizResults: SessionCustomQuizResults
   aiSummaries: AiSummary[]
   exitTickets: ExitTicket[]
 }
