@@ -89,6 +89,10 @@ function normalizedAnswer(value: string) {
   return value.normalize('NFKC').trim().toLocaleLowerCase().replace(/[\s.,，。！？!?、;；:'"「」『』（）()]/g, '')
 }
 
+function wait(milliseconds: number) {
+  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+}
+
 export async function generateCustomQuiz(input: {
   screenshotUrl: string
   direction: string
@@ -111,26 +115,45 @@ export async function generateCustomQuiz(input: {
     ? '可依出題方向與素材混合使用選擇、填充與簡答題。'
     : `每一題都必須是 ${input.requestedType}。`
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      systemInstruction: {
-        parts: [{
-          text: `你是 InterAct 的測驗設計助理。請根據教師截圖和出題方向建立適合課堂即時作答的測驗。題目主文必須使用台灣慣用繁體中文並提供忠實自然的英文翻譯。${countInstruction}${typeInstruction} 選擇題須有 2 至 6 個互不重複的選項，accepted_answers 只能包含正確選項原文。填充題請在題幹使用 ____ 標示作答處，accepted_answers 提供可接受答案與常見同義答案。簡答題提供參考答案於 accepted_answers，並在 rubric 寫出具體評分準則。不得捏造截圖無法支持的專有事實；若截圖資訊有限，應依教師的出題方向設計可合理回答的理解題。`,
-        }],
-      },
-      contents: [{
-        role: 'user',
-        parts: [
-          { text: JSON.stringify({ direction: input.direction, requested_count: input.requestedCount, requested_type: input.requestedType }) },
-          { inlineData: { mimeType, data: imageBase64 } },
-        ],
+  const requestBody = JSON.stringify({
+    systemInstruction: {
+      parts: [{
+        text: `你是 InterAct 的測驗設計助理。請根據教師截圖和出題方向建立適合課堂即時作答的測驗。題目主文必須使用台灣慣用繁體中文並提供忠實自然的英文翻譯。${countInstruction}${typeInstruction} 選擇題須有 2 至 6 個互不重複的選項，accepted_answers 只能包含正確選項原文。填充題請在題幹使用 ____ 標示作答處，accepted_answers 提供可接受答案與常見同義答案。簡答題提供參考答案於 accepted_answers，並在 rubric 寫出具體評分準則。不得捏造截圖無法支持的專有事實；若截圖資訊有限，應依教師的出題方向設計可合理回答的理解題。`,
       }],
-      generationConfig: { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } },
-    }),
-    signal: AbortSignal.timeout(60_000),
+    },
+    contents: [{
+      role: 'user',
+      parts: [
+        { text: JSON.stringify({ direction: input.direction, requested_count: input.requestedCount, requested_type: input.requestedType }) },
+        { inlineData: { mimeType, data: imageBase64 } },
+      ],
+    }],
+    generationConfig: { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } },
   })
+
+  let response: Response | null = null
+  let requestError: unknown = null
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
+        body: requestBody,
+        signal: AbortSignal.timeout(60_000),
+      })
+      if (response.ok || ![429, 500, 502, 503, 504].includes(response.status) || attempt === 2) break
+      await response.body?.cancel()
+    } catch (error) {
+      requestError = error
+      if (attempt === 2) break
+    }
+    await wait(800 * (attempt + 1))
+  }
+
+  if (!response) {
+    const detail = requestError instanceof Error ? requestError.message : 'network request failed'
+    throw new Error(`Gemini quiz generation request failed: ${detail}`)
+  }
 
   if (!response.ok) {
     const detail = (await response.text()).slice(0, 1000)

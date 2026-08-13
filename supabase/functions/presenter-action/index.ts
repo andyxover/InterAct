@@ -900,6 +900,12 @@ Deno.serve(async (req) => {
     const detail = error instanceof Error ? error.message : 'Presenter action failed.'
     console.error('presenter-action failed', detail)
     if (/Only HTTP/.test(detail)) return jsonResponse({ message: '網址格式不正確，僅支援 http 或 https。' }, 400)
+    if (/Gemini quiz generation failed \(429\)/.test(detail)) return jsonResponse({ message: 'AI 出題服務目前忙碌或已達速率限制，請稍候再試。' }, 429)
+    if (/Gemini quiz generation failed \((500|502|503|504)\)/.test(detail)) return jsonResponse({ message: 'AI 出題服務暫時異常，系統已自動重試；請稍候再派送一次。' }, 502)
+    if (/Gemini quiz generation request failed|timed out|TimeoutError|AbortError/i.test(detail)) return jsonResponse({ message: 'AI 出題服務連線逾時，請稍候再派送一次。' }, 504)
+    if (/AI returned|AI did not follow|invalid answer key|needs at least|needs an accepted answer|has no prompt|unsupported question count/i.test(detail)) {
+      return jsonResponse({ message: 'AI 產生的題目格式不完整，請調整出題方向後再試。' }, 422)
+    }
     return jsonResponse({ message: '講者操作失敗，請稍後再試。' }, 500)
   }
 })
