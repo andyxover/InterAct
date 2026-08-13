@@ -223,11 +223,10 @@ export function PresenterSettingsModal({
                   <label key={language.code}>
                     <input
                       checked={checked}
-                      disabled={!checked && interpretationLanguages.length >= 3}
                       type="checkbox"
                       onChange={(event) => {
                         const next = event.target.checked
-                          ? [...new Set([...interpretationLanguages, language.code])].slice(0, 3)
+                          ? [...new Set([...interpretationLanguages, language.code])]
                           : interpretationLanguages.filter((code) => code !== language.code)
                         setInterpretationLanguages(next)
                       }}
@@ -238,7 +237,7 @@ export function PresenterSettingsModal({
               })}
             </div>
           )}
-          <p className="muted caption-cost-note">字幕語言與講師語言不同時會建立一條即時翻譯連線。中文授課預設英文口譯，英文授課預設繁體中文；口譯語音最多三種，每種語言建立一條付費即時翻譯連線，學生人數不增加連線數。</p>
+          <p className="muted caption-cost-note">字幕語言與講師語言不同時會建立一條即時翻譯連線。中文授課預設英文口譯，英文授課預設繁體中文；每種口譯語言各建立一條付費即時翻譯連線，學生人數不增加連線數。</p>
         </section>
 
         {error && <p className="error">{error}</p>}

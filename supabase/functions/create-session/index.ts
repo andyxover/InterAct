@@ -41,7 +41,7 @@ Deno.serve(async (req) => {
     const interpretationLanguages = Array.isArray(input.interpretationLanguages)
       ? [...new Set(input.interpretationLanguages.filter((language: unknown): language is string => (
         typeof language === 'string' && interpretationLanguagesSupported.has(language) && language !== sourceLanguage
-      )))].slice(0, 3)
+      )))]
       : []
     const interpretationAudioEnabled = Boolean(input.interpretationAudioEnabled) && interpretationLanguages.length > 0
     const presenterToken = `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll('-', '')
