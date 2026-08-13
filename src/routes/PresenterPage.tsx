@@ -946,19 +946,6 @@ export function PresenterPage() {
     })
     if (error) throw error
     if (!data?.question) throw new Error(data?.message || '停止作答失敗。')
-    const stoppedQuestion = data.question as Question
-    if (stoppedQuestion.screenshot_id && !['send_screen', 'custom_quiz'].includes(stoppedQuestion.type) && (answerCounts[stoppedQuestion.id] || 0) > 0) {
-      setAnalysisBusy(true)
-      const analyzed = await requireSupabase().functions.invoke('analyze-question', {
-        body: { sessionId, questionId: stoppedQuestion.id, presenterToken },
-      })
-      setAnalysisBusy(false)
-      if (analyzed.error) {
-        setAnalysisError(`題目已停止，但自動辨識暫時失敗；稍後可按「AI 分析」重試。`)
-      } else if (analyzed.data?.analysis) {
-        setAnalysis(analyzed.data.analysis as QuestionAnalysis)
-      }
-    }
   }
 
   async function setCorrectAnswer(answer: string) {
