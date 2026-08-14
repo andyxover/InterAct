@@ -89,7 +89,7 @@ export function CustomQuizReviewPage() {
       <header>
         <div>
           <p className="eyebrow"><BrainCircuit size={18} />自訂測驗檢視與答案調整</p>
-          <h1>{results?.quiz.title || '正在載入自訂測驗...'}</h1>
+          <h1>{results?.quiz?.title || (results ? 'AI 正在出題中，請稍候...' : '正在載入自訂測驗...')}</h1>
         </div>
         <button aria-label="關閉測驗檢視視窗" className="icon-button" title="關閉" type="button" onClick={() => window.interactDesktop?.close()}><X size={24} /></button>
       </header>

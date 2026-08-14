@@ -1,5 +1,6 @@
 import { HashRouter, Navigate, Route, Routes, useLocation } from 'react-router-dom'
 import { DesktopWindowChrome } from './components/DesktopWindowChrome'
+import { ErrorBoundary } from './ErrorBoundary'
 import { DesktopOverlayPage } from './routes/DesktopOverlayPage'
 import { CustomQuizReviewPage } from './routes/CustomQuizReviewPage'
 import { HomePage } from './routes/HomePage'
@@ -48,7 +49,9 @@ function AppRoutes() {
 export function App() {
   return (
     <HashRouter>
-      <AppRoutes />
+      <ErrorBoundary>
+        <AppRoutes />
+      </ErrorBoundary>
     </HashRouter>
   )
 }

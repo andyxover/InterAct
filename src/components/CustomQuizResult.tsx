@@ -99,6 +99,9 @@ export function CustomQuizResult({ anonymousEnabled, question, results, onlineCo
   if (!results) {
     return <section className="panel result-panel"><p className="muted">正在載入自訂測驗...</p></section>
   }
+  if (!results.quiz) {
+    return <section className="panel result-panel"><p className="muted">AI 正在出題中，請稍候...</p></section>
+  }
   const graded = results.attempts.filter((attempt) => attempt.status === 'graded')
   const grading = results.attempts.filter((attempt) => attempt.status === 'grading')
   const average = graded.length

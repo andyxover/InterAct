@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
-import { BookOpen, PartyPopper, Send, Sparkles } from 'lucide-react'
+import { BookOpen, PartyPopper, Send, Sparkles, Waves } from 'lucide-react'
 import { useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
 import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
@@ -63,6 +63,7 @@ export function ParticipantPage() {
   const [exitTicketBusy, setExitTicketBusy] = useState(false)
   const [message, setMessage] = useState('')
   const [error, setError] = useState('')
+  const [sessionChecked, setSessionChecked] = useState(false)
   const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
   const loadSequence = useRef(0)
   const loadedQuizQuestionId = useRef('')
@@ -89,6 +90,7 @@ export function ParticipantPage() {
     if (requestId !== loadSequence.current) return
     const nextSession = sessionData as Session | null
     setSession(nextSession)
+    setSessionChecked(true)
     setParticipant(participantData as Participant | null)
     setExitTicket((exitTicketData as ExitTicket | null) || null)
     setSharedContents((sharedContentData || []) as SharedContent[])
@@ -496,6 +498,20 @@ export function ParticipantPage() {
             />
           </section>
         )}
+      </main>
+    )
+  }
+
+  if (sessionChecked && !session) {
+    return (
+      <main className="participant-page participant-ended-page">
+        <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
+        <SetupNotice />
+        <section className="participant-ended-hero">
+          <span className="participant-ended-icon"><Waves size={34} /></span>
+          <h1>{participantText(locale, 'sessionGoneTitle')}</h1>
+          <p>{participantText(locale, 'sessionGoneMessage')}</p>
+        </section>
       </main>
     )
   }
