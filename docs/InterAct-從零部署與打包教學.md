@@ -2,23 +2,31 @@
 
 這份教材給第一次接觸程式、終端機、資料庫與 API 的 Windows 使用者。照順序完成即可，不需要先學會寫程式。
 
-> 適用版本：InterAct Windows x64 portable 版
-> 最後更新：2026-07-29（InterAct 1.0.4）
-> 重要：每位講師都要使用自己的 Supabase、Gemini、GitHub 與 Reurl 帳號，不要共用別人的 API key 或資料庫。
+> 適用版本：InterAct Windows x64 portable 版（InterAct.exe 與 InterActPlus.exe）
+> 最後更新：2026-08-14（InterAct 1.0.5）
+> 重要：每位講師都要使用自己的 Supabase、Gemini、GitHub、Reurl（與 Plus 版的 OpenAI）帳號，不要共用別人的 API key 或資料庫。
 
 ## 一、先理解會建立什麼
 
-InterAct 不是只有一個 EXE。完整系統由四項雲端服務與一個 Windows 程式組成：
+InterAct 提供**兩種 Windows 程式**，都是同一套原始碼打包出來的，差別只在有沒有即時字幕與口譯：
 
-| 元件 | 用途 | 學員是否直接接觸 |
+| 版本 | 檔名 | 功能 |
 | --- | --- | --- |
-| Supabase | 場次、姓名、回答、即時同步、圖片及後端函式 | 會透過網頁連線 |
-| Gemini API | 圖片題目、問答及整堂課分析 | 不會看到 API key |
-| GitHub Pages | 放置學員掃 QR Code 後開啟的網頁 | 會直接開啟 |
-| Reurl.cc | 把很長的學員網址縮短 | 會看到短網址 |
-| `interact.exe` | 講者端 Windows 程式 | 只有講者使用 |
+| 標準版 | `InterAct.exe` | 彈幕互動、截圖派題、投票/選擇/是非/問答題、抽籤、搶答、Exit Ticket、AI 課後分析 |
+| Plus 版 | `InterActPlus.exe` | 標準版全部功能，再加上即時字幕與即時口譯語音 |
 
-打包完成後，學員不需要安裝程式，只需用瀏覽器開啟網址。講者電腦也不必另裝 Node.js 才能執行已打包的 `interact.exe`。
+完整系統由雲端服務與一個 Windows 程式組成：
+
+| 元件 | 用途 | 兩版都需要？ | 學員是否直接接觸 |
+| --- | --- | --- | --- |
+| Supabase | 場次、姓名、回答、即時同步、圖片及後端函式 | 是 | 會透過網頁連線 |
+| Gemini API | 圖片題目、問答及整堂課分析 | 是 | 不會看到 API key |
+| GitHub Pages | 放置學員掃 QR Code 後開啟的網頁 | 是 | 會直接開啟 |
+| Reurl.cc | 把很長的學員網址縮短 | 選用 | 會看到短網址 |
+| OpenAI Realtime | 即時字幕與即時口譯語音 | 只有 Plus 版需要 | 不會看到 API key |
+| `InterAct.exe` / `InterActPlus.exe` | 講者端 Windows 程式 | 擇一或都打包 | 只有講者使用 |
+
+打包完成後，學員不需要安裝程式，只需用瀏覽器開啟網址。講者電腦也不必另裝 Node.js 才能執行已打包好的 exe。
 
 ## 二、準備帳號與電腦
 
@@ -27,16 +35,17 @@ InterAct 不是只有一個 EXE。完整系統由四項雲端服務與一個 Win
 - Windows 10 或 Windows 11，64 位元。
 - 穩定網路。
 - 至少保留 3 GB 磁碟空間。
-- 建議把專案解壓縮到簡單路徑，例如 `C:\InterAct`，不要放在雲端同步資料夾。
+- 建議把專案解壓縮到簡單路徑，例如 `C:\InterAct`，不要放在雲端同步資料夾（例如 Dropbox、OneDrive 的同步目錄）。這類資料夾常會把 `.git` 或打包中間檔標記成「僅在雲端」，導致 Git 或打包指令間歇性失敗。
 
-### 2.2 建立四個帳號
+### 2.2 建立帳號
 
 1. [GitHub](https://github.com/signup)
 2. [Supabase](https://supabase.com/dashboard)
 3. [Google AI Studio](https://aistudio.google.com/)
-4. [Reurl.cc](https://reurl.cc/main/tw)
+4. [Reurl.cc](https://reurl.cc/main/tw)（選用，不設定時仍可用長網址）
+5. [OpenAI Platform](https://platform.openai.com/)（只有要打包 `InterActPlus.exe` 才需要）
 
-各服務的免費額度與收費規則可能調整，正式使用前請在各服務的 Pricing 頁面確認。所有 Gemini 呼叫都會計入建立該 key 的 Google 專案額度。
+各服務的免費額度與收費規則可能調整，正式使用前請在各服務的 Pricing 頁面確認。所有 Gemini／OpenAI 呼叫都會計入建立該 key 的帳號額度。
 
 ## 三、取得 InterAct 原始碼
 
@@ -240,7 +249,7 @@ powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\c
 - `VITE_SUPABASE_ANON_KEY`
 - `VITE_PUBLIC_APP_URL`
 
-它們都是前端公開設定。Gemini 與 Reurl key 不可放在這裡。
+它們都是前端公開設定。Gemini、Reurl 與 OpenAI key 都不可放在這裡。
 
 ### 8.4 GitHub Pages 成功檢查
 
@@ -251,7 +260,7 @@ powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\c
 
 看到 InterAct 頁面即表示學員網站已上線。第一次部署可能需要幾分鐘。
 
-## 九、部署 Reurl.cc 短網址
+## 九、部署 Reurl.cc 短網址（選用）
 
 Reurl 不是網站主機，只負責把 GitHub Pages 長網址縮短。未設定 Reurl 時 InterAct 仍可使用，只是會顯示長網址。
 
@@ -276,55 +285,103 @@ powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\d
 
 Reurl 會把結果快取在場次資料中，因此部署完成後必須建立「全新場次」。QR Code 下方若出現 `https://reurl.cc/...` 即成功。
 
-## 十、打包 Windows `interact.exe`
+## 十、部署 OpenAI Realtime（只有 `InterActPlus.exe` 需要）
 
-### 10.1 執行自動打包腳本
+只想打包標準版 `InterAct.exe` 的人可以整章跳過，直接看第十一章。
 
-將下方三個值換成自己的資料，整行輸入：
+InterAct Plus 使用 OpenAI Realtime API 產生原文字幕與多語翻譯字幕，課後分析仍使用既有的 Gemini API。
+
+### 10.1 建立 OpenAI key
+
+1. 開啟 [OpenAI Platform API Keys](https://platform.openai.com/api-keys)。
+2. 使用自己的帳號登入，並確認已設定計費方式。
+3. 按 **Create new secret key**，選一個有權限使用 Realtime API 的專案。
+4. 複製新 key，暫時保留在剪貼簿或密碼管理器。
+
+不要把 OpenAI key 放進 `.env`、GitHub Variables、前端程式、教學截圖或打包進 `InterAct.exe` / `InterActPlus.exe`。
+
+### 10.2 部署 OpenAI secret 與函式
 
 ```powershell
-powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\package-windows.ps1 -SupabaseUrl https://YOUR_PROJECT_REF.supabase.co -PublishableKey sb_publishable_你的值 -PublicAppUrl https://GITHUB帳號.github.io/InterAct
+powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\deploy-openai.ps1 -ProjectRef YOUR_PROJECT_REF
+```
+
+看到提示後貼上 OpenAI key，再按 Enter。腳本會把 key 存進 Supabase Edge Function secrets，並部署 `openai-realtime-session` 函式。前端只會拿到這個函式核發的短效 Realtime client secret，長效 OpenAI key 只存在 Supabase。
+
+### 10.3 運作方式與尚未包含的功能
+
+- 講師開課時選擇講話語言、講師字幕語言，以及開放給學生的翻譯字幕語言。
+- 講師在功能列按「開始即時字幕」後，Windows App 才會要求麥克風權限。
+- 未完成字幕以 Supabase Realtime Broadcast 傳送，完整句子寫入 `caption_segments`。
+- 學員可從講師開放的語言中切換字幕。
+- 原文逐字稿會進入下課 AI 分析，Excel 會新增「即時字幕逐字稿」工作表。
+- 多人「翻譯語音」廣播需要 LiveKit、Cloudflare Calls 或其他 SFU／媒體服務。現階段已完成即時原文與翻譯字幕，未把每位學生直接連到 OpenAI，避免費用隨學生人數成倍增加。
+
+### 10.4 OpenAI 成功檢查
+
+建立新場次，開啟即時字幕，確認字幕畫面出現逐字內容；至少切換一種口譯語言，確認參與者手機能聽到翻譯語音。
+
+## 十一、打包 Windows exe
+
+### 11.1 決定要打包哪一版
+
+- 只要基本互動：打包 `InterAct.exe`（跳過第十章）。
+- 要含即時字幕與口譯：先完成第十章，再打包 `InterActPlus.exe`。
+- 兩個都要給大家用：兩個指令各跑一次即可，互不影響。
+
+### 11.2 執行自動打包腳本
+
+將下方三個值換成自己的資料，`-Edition` 填 `standard`（標準版）或 `plus`（Plus 版，預設值）：
+
+```powershell
+powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\package-windows.ps1 -SupabaseUrl https://YOUR_PROJECT_REF.supabase.co -PublishableKey sb_publishable_你的值 -PublicAppUrl https://GITHUB帳號.github.io/InterAct -Edition plus
 ```
 
 腳本會依序：
 
 1. 建立本機 `.env`。
 2. 安裝鎖定版本的程式套件。
-3. 檢查並建置 React 網頁。
+3. 依所選版本檢查並建置 React 網頁（Plus 版含即時字幕/口譯介面，標準版不含）。
 4. 在 Windows 暫存區壓縮 Electron portable 程式。
-5. 將完成品複製到專案根目錄，檔名為 `interact.exe`。
+5. 將完成品複製到專案根目錄，檔名為 `InterActPlus.exe`（Plus）或 `InterAct.exe`（標準）。
 
-第一次可能需要 5 到 15 分鐘。成功時 PowerShell 會列出檔案位置、大小、版本與 SHA256。若看到 `default Electron icon is used`，代表主題圖示沒有正確套用，不要交付該檔案；請確認 `build\icon.ico` 存在後重跑。
+第一次可能需要 5 到 15 分鐘。成功時 PowerShell 會列出版本、檔案位置、大小、版本與 SHA256。若看到 `default Electron icon is used`，代表主題圖示沒有正確套用，不要交付該檔案；請確認 `build\icon.ico` 存在後重跑。
 
-### 10.2 打包成功標準
+### 11.3 打包成功標準
 
-回到 InterAct 資料夾，應看到：
+回到 InterAct 資料夾，應看到你所選版本的檔案，例如：
 
 ```text
-interact.exe
+InterActPlus.exe
 ```
 
-檔案通常約 90 MB。雙擊後應可建立場次，QR Code 必須指向自己的 GitHub Pages 網址。
+或
 
-### 10.3 確認新版圖示與 Windows 釘選
+```text
+InterAct.exe
+```
 
-1. 先把舊 InterAct 從「開始」與工作列取消釘選，並關閉所有 InterAct 視窗。
-2. 刪除或改名舊的 `interact.exe`，再執行本章打包指令。
-3. 從專案根目錄雙擊新版 `interact.exe`。
+檔案通常約 90 MB。雙擊後應可建立場次，QR Code 必須指向自己的 GitHub Pages 網址。標準版的控制面板不應出現「教師端設定」齒輪、「開始課程錄製」與「開啟字幕」按鈕；Plus 版則應該看得到。
+
+### 11.4 確認新版圖示與 Windows 釘選
+
+1. 先把舊版本從「開始」與工作列取消釘選，並關閉所有 InterAct 視窗。
+2. 刪除或改名舊的 exe，再執行本章打包指令。
+3. 從專案根目錄雙擊新版 exe。
 4. 程式開啟後，再從工作列圖示按右鍵釘選。
-5. 要釘選到開始畫面時，請在檔案總管對新版 `interact.exe` 按右鍵並選「釘選到開始」。
+5. 要釘選到開始畫面時，請在檔案總管對新版 exe 按右鍵並選「釘選到開始」。
 
-不要直接沿用舊釘選項目。Windows 會快取舊捷徑圖示；InterAct 1.0.4 會從永久存在的 EXE 本身讀取 Start 圖示，但舊捷徑仍需取消後重新釘選一次。
+不要直接沿用舊釘選項目。Windows 會快取舊捷徑圖示，舊捷徑仍需取消後重新釘選一次。
 
-### 10.4 Windows 安全警告
+### 11.5 Windows 安全警告
 
 目前測試版沒有商業程式碼簽章，因此從網路下載後可能出現 Microsoft Defender SmartScreen「Windows 已保護您的電腦」。只有在檔案來自可信任來源且已核對雜湊時才繼續執行。公開產品化時應採用 Microsoft Store 或可信任的程式碼簽章方案，不應長期要求一般使用者略過警告。
 
-## 十一、完整驗收
+## 十二、完整驗收
 
 至少準備一台 Windows 講者電腦與一支不在同一網路的手機，依序測試：
 
-- [ ] `interact.exe` 能開啟並建立場次。
+- [ ] exe 能開啟並建立場次。
 - [ ] QR Code 與短網址能從手機開啟。
 - [ ] 學員可以輸入姓名並加入。
 - [ ] 講者端顯示正確在線人數。
@@ -337,8 +394,11 @@ interact.exe
 - [ ] Exit Ticket 與整堂課報告正常。
 - [ ] Excel 報表可匯出並開啟。
 - [ ] 學員端 Facebook 與 YouTube 圖示可開新分頁。
+- [ ] （Plus 版）即時字幕能開啟並顯示逐字內容。
+- [ ] （Plus 版）至少一種口譯語言能在學員手機正常播放。
+- [ ] （標準版）控制面板確實看不到字幕/口譯相關按鈕與設定。
 
-## 十二、最常見問題
+## 十三、最常見問題
 
 ### `node`、`pnpm` 或 `gh` 不是可辨識的命令
 
@@ -378,30 +438,39 @@ https://YOUR_PROJECT_REF.supabase.co
 
 重新執行 `deploy-reurl.ps1`，然後建立新場次。舊場次會保留原本快取結果。
 
+### 即時字幕無法開啟或立即中斷
+
+重新執行 `deploy-openai.ps1`，確認該 OpenAI 帳號已設定計費方式且有 Realtime API 權限。確認打包時用的是 `-Edition plus`。
+
+### 標準版還是看得到字幕/口譯按鈕
+
+代表打包時沒有加 `-Edition standard`，或用了舊版指令 `pnpm build`／`pnpm desktop:package`（兩者預設都是 Plus 版）。請改用 `pnpm build:standard`／`pnpm desktop:package:standard`，或在 `package-windows.ps1` 加上 `-Edition standard`。
+
 ### 打包時出現 `EPERM` 或 `EBUSY`
 
-先關閉所有 InterAct 程式，再重跑 `package-windows.ps1`。此腳本已使用 Windows 暫存區打包，可避開大多數 Dropbox 或 OneDrive 鎖檔問題。
+先關閉所有 InterAct 程式，再重跑 `package-windows.ps1`。此腳本已使用 Windows 暫存區打包，可避開大多數 Dropbox 或 OneDrive 鎖檔問題。若專案資料夾本身放在 Dropbox／OneDrive 同步路徑下，也請確認該同步用戶端正在執行；同步用戶端沒開啟時，`.git` 內的雲端佔位檔會讓 Git 指令一併失敗。
 
-### 無法覆蓋 `interact.exe`
+### 無法覆蓋 `InterAct.exe` 或 `InterActPlus.exe`
 
-代表舊的 InterAct 還在執行。開啟工作管理員，結束 `InterAct` 後再打包。
+代表舊的程式還在執行。開啟工作管理員，結束對應程序後再打包。
 
-## 十三、更新與換 key
+## 十四、更新與換 key
 
 - 只換 Gemini key：重跑 `deploy-gemini.ps1`。
 - 只換 Reurl key：重跑 `deploy-reurl.ps1`，並用新場次測試。
-- 換 Supabase 專案：必須重新完成 Supabase、Gemini、GitHub、Reurl 與 Windows 打包五階段。
+- 只換 OpenAI key：重跑 `deploy-openai.ps1`。
+- 換 Supabase 專案：必須重新完成 Supabase、Gemini、GitHub、Reurl（與 Plus 版的 OpenAI）以及 Windows 打包各階段。
 - 換 GitHub 帳號或 repository 名稱：重跑 GitHub Pages 設定與 Windows 打包。
 - 取得新版原始碼：重新下載最新版 ZIP，再使用自己的值重新打包。
 - 不要對已有正式資料的 Supabase 專案重跑全新資料庫初始化；更新資料庫前應先備份並依新版 migration 操作。
 
-## 十四、安全與隱私底線
+## 十五、安全與隱私底線
 
 - `sb_publishable_...` 可放在前端；`sb_secret_...`、`service_role` 與 Database Password 絕對不可。
-- Gemini 與 Reurl key 只能存在 Supabase secrets。
+- Gemini、Reurl 與 OpenAI key 只能存在 Supabase secrets。
 - 不要把任何秘密 key 貼到聊天、Issue、README、GitHub Variables、截圖或教學影片。
 - 每位講師使用自己的 Supabase，可避免不同講師的姓名與課堂資料混在一起。
-- Gemini 分析會處理題目截圖與學員回答；使用前應依組織規範告知參與者，避免輸入個資或敏感資料。
+- Gemini 與 OpenAI 會處理題目截圖、學員回答與課堂語音；使用前應依組織規範告知參與者，避免輸入個資或敏感資料。
 - 目前版本適合封閉測試，不應直接承載醫療、財務、未公開商業或其他高度敏感資訊。
 
 ## 官方參考資料
@@ -413,6 +482,8 @@ https://YOUR_PROJECT_REF.supabase.co
 - [Supabase API key 類型](https://supabase.com/docs/guides/getting-started/api-keys)
 - [Supabase Edge Function secrets](https://supabase.com/docs/guides/functions/secrets)
 - [Gemini API key](https://ai.google.dev/gemini-api/docs/api-key)
+- [OpenAI API keys](https://platform.openai.com/api-keys)
+- [OpenAI Realtime API](https://platform.openai.com/docs/guides/realtime)
 - [GitHub Actions Variables](https://docs.github.com/en/actions/concepts/workflows-and-actions/variables)
 - [GitHub Pages 自訂 Actions workflow](https://docs.github.com/en/pages/getting-started-with-github-pages/using-custom-workflows-with-github-pages)
 - [Reurl.cc API 文件](https://reurl.cc/main/dev/doc/tw)
