@@ -22,6 +22,7 @@ const messages = {
     audioNotEnabled: '音訊輸出未啟用；請點右上角喇叭後重新開始聆聽。', headphoneHint: '建議戴上耳機，選擇語言後開始聆聽。',
     testPlayed: '已播放測試音；若沒有聽見，請檢查裝置音量與耳機輸出。', imageAlt: '講者派送圖片', congratulations: '恭喜！',
     winnerIs: '得獎的是', canBuzz: '現在可以搶答', waitPresenter: '請等待主講者開始', submitting: '送出中', buzz: '搶答', preparing: '準備中',
+    sessionGoneTitle: '這場次已經莎喲娜啦了！', sessionGoneMessage: '下回請早！',
   },
   en: {
     language: 'Language', chinese: '繁體中文', english: 'English', courseEnded: 'Class ended', classDismissed: 'That’s a wrap!',
@@ -44,6 +45,7 @@ const messages = {
     audioNotEnabled: 'Audio output is not enabled. Tap the speaker icon and start listening again.', headphoneHint: 'Wear headphones, choose a language, then start listening.',
     testPlayed: 'Test tone played. If you cannot hear it, check your volume and audio output.', imageAlt: 'Image shared by presenter', congratulations: 'Congratulations!',
     winnerIs: 'The winner is', canBuzz: 'Buzz in now', waitPresenter: 'Wait for the presenter to start', submitting: 'Sending', buzz: 'Buzz', preparing: 'Get ready',
+    sessionGoneTitle: 'This session has said its sayonara!', sessionGoneMessage: 'Catch the next one bright and early!',
   },
 } as const
 
