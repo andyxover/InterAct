@@ -1,5 +1,22 @@
 const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell } = require('electron')
 const path = require('node:path')
+const fs = require('node:fs')
+
+function logFatalError(scope, error) {
+  const message = `[${new Date().toISOString()}] [${scope}] ${error?.stack || error}\n`
+  console.error(message)
+  try {
+    fs.appendFileSync(path.join(app.getPath('userData'), 'crash.log'), message)
+  } catch {
+    // Best-effort logging only; never let logging itself crash the process.
+  }
+}
+
+// Without these, any uncaught error anywhere in the main process (e.g. a timer
+// callback touching an already-destroyed BrowserWindow) exits the whole app
+// instantly with no dialog and no trace — every window vanishes mid-class.
+process.on('uncaughtException', (error) => logFatalError('uncaughtException', error))
+process.on('unhandledRejection', (reason) => logFatalError('unhandledRejection', reason))
 
 const isDesktopDev = process.env.INTERACT_DESKTOP_DEV === '1'
 const APP_USER_MODEL_ID = 'tw.interact.presenter.desktop'
@@ -180,7 +197,7 @@ function startOverlayKeepAlive() {
   overlayKeepAliveTimer = setInterval(() => {
     reinforcePresenterTopmost()
     if (overlayVisibilitySuppressed || !overlayWindow || overlayWindow.isDestroyed()) return
-    const targetDisplay = displayForBounds(mainWindow?.getBounds())
+    const targetDisplay = displayForBounds(safeBounds(mainWindow))
     const bounds = overlayWindow.getBounds()
     if (
       bounds.x !== targetDisplay.bounds.x
@@ -203,7 +220,7 @@ function createOverlayWindow(sessionId) {
   closeOverlayWindow()
   overlayVisibilitySuppressed = false
   latestLotteryEvent = null
-  const targetDisplay = displayForBounds(mainWindow?.getBounds())
+  const targetDisplay = displayForBounds(safeBounds(mainWindow))
 
   const nextOverlayWindow = new BrowserWindow({
     ...targetDisplay.bounds,
@@ -313,7 +330,7 @@ function createWordCloudWindow(sessionId) {
     return
   }
 
-  const targetDisplay = displayForBounds(mainWindow?.getBounds())
+  const targetDisplay = displayForBounds(safeBounds(mainWindow))
   const width = Math.min(1180, Math.max(860, targetDisplay.workArea.width - 120))
   const height = Math.min(780, Math.max(600, targetDisplay.workArea.height - 120))
   wordCloudWindow = new BrowserWindow({
@@ -373,7 +390,7 @@ function createCustomQuizReviewWindow(sessionId, questionId) {
     return
   }
 
-  const targetDisplay = displayForBounds(mainWindow?.getBounds())
+  const targetDisplay = displayForBounds(safeBounds(mainWindow))
   const workArea = targetDisplay.workArea
   const width = Math.max(800, Math.round(workArea.width * 0.8))
   const height = Math.max(600, Math.round(workArea.height * 0.8))
@@ -434,8 +451,15 @@ function createCustomQuizReviewWindow(sessionId, questionId) {
   })
 }
 
+// A destroyed BrowserWindow still passes a truthy/non-null check, but calling
+// any method on it (e.g. getBounds) throws. Route every bounds read through
+// here so a window torn down mid-tick can never throw an uncaught exception.
+function safeBounds(window) {
+  return window && !window.isDestroyed() ? window.getBounds() : null
+}
+
 function displayForBounds(bounds) {
-  return screen.getDisplayMatching(bounds || mainWindow?.getBounds() || screen.getPrimaryDisplay().bounds)
+  return screen.getDisplayMatching(bounds || safeBounds(mainWindow) || screen.getPrimaryDisplay().bounds)
 }
 
 function clamp(value, minimum, maximum) {
@@ -443,10 +467,10 @@ function clamp(value, minimum, maximum) {
 }
 
 function setControlBounds(expanded, snapToTopRight = false, settingsOpen = false) {
-  if (!mainWindow) return
+  if (!mainWindow || mainWindow.isDestroyed()) return
 
   const size = settingsOpen ? CONTROL_WITH_SETTINGS : expanded ? CONTROL_EXPANDED : CONTROL_COLLAPSED
-  const current = lastControlBounds || mainWindow.getBounds()
+  const current = lastControlBounds || safeBounds(mainWindow) || screen.getPrimaryDisplay().workArea
   const display = displayForBounds(current)
   const workArea = display.workArea
   const right = snapToTopRight ? workArea.x + workArea.width - WINDOW_MARGIN : current.x + current.width
@@ -568,7 +592,7 @@ ipcMain.handle('window:open-custom-quiz-review', (_event, sessionId, questionId)
 ipcMain.handle('capture:list', listCaptureSources)
 
 ipcMain.handle('capture:start-selection', async () => {
-  if (!mainWindow) throw new Error('InterAct presenter window is unavailable.')
+  if (!mainWindow || mainWindow.isDestroyed()) throw new Error('InterAct presenter window is unavailable.')
 
   lastControlBounds = mainWindow.getBounds()
   const targetDisplay = displayForBounds(lastControlBounds)
