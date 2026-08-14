@@ -14,6 +14,7 @@ release
 /release-build/
 /InterAct.exe
 /InterActPlus.exe
+/VSInterAct.exe
 .codex-tmp/
 .env
 *.local

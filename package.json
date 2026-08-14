@@ -13,8 +13,10 @@
     "desktop:start": "pnpm build && electron .",
     "desktop:package": "pnpm build && cross-env APP_EDITION=plus electron-builder --win portable --x64",
     "desktop:package:standard": "pnpm build:standard && cross-env APP_EDITION=standard electron-builder --win portable --x64",
+    "desktop:package:viewsonic": "pnpm build:viewsonic && cross-env APP_EDITION=plus APP_BRAND=viewsonic electron-builder --win portable --x64",
     "build": "tsc -b && vite build",
     "build:standard": "tsc -b && cross-env VITE_APP_EDITION=standard vite build",
+    "build:viewsonic": "tsc -b && cross-env VITE_APP_EDITION=plus VITE_APP_BRAND=viewsonic vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },

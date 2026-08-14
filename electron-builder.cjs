@@ -1,11 +1,15 @@
 // APP_EDITION selects which Windows app gets built:
 //   plus     (default) -> InterActPlus.exe, with live captions and interpretation.
 //   standard           -> InterAct.exe, screenshot interaction only.
+// APP_BRAND=viewsonic builds the ViewSonic campaign variant (VSInterAct.exe)
+// instead, regardless of edition, with its own appId so it keeps separate
+// userData/crash.log from the other two builds.
 const edition = process.env.APP_EDITION === 'standard' ? 'standard' : 'plus'
-const productName = edition === 'standard' ? 'InterAct' : 'InterActPlus'
+const isViewSonicBrand = process.env.APP_BRAND === 'viewsonic'
+const productName = isViewSonicBrand ? 'VSInterAct' : edition === 'standard' ? 'InterAct' : 'InterActPlus'
 
 module.exports = {
-  appId: 'tw.interact.presenter.desktop',
+  appId: isViewSonicBrand ? 'tw.interact.presenter.viewsonic' : 'tw.interact.presenter.desktop',
   productName,
   artifactName: `${productName}.\${ext}`,
   directories: {
