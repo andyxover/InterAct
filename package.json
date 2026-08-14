@@ -9,9 +9,12 @@
   "scripts": {
     "dev": "vite",
     "desktop:dev": "concurrently -k \"vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env INTERACT_DESKTOP_DEV=1 electron .\"",
+    "desktop:dev:standard": "concurrently -k \"cross-env VITE_APP_EDITION=standard vite --host 127.0.0.1\" \"wait-on http://127.0.0.1:5173 && cross-env INTERACT_DESKTOP_DEV=1 electron .\"",
     "desktop:start": "pnpm build && electron .",
-    "desktop:package": "pnpm build && electron-builder --win portable --x64",
+    "desktop:package": "pnpm build && cross-env APP_EDITION=plus electron-builder --win portable --x64",
+    "desktop:package:standard": "pnpm build:standard && cross-env APP_EDITION=standard electron-builder --win portable --x64",
     "build": "tsc -b && vite build",
+    "build:standard": "tsc -b && cross-env VITE_APP_EDITION=standard vite build",
     "lint": "oxlint",
     "preview": "vite preview"
   },
@@ -41,48 +44,5 @@
     "typescript": "~6.0.2",
     "vite": "^8.1.5",
     "wait-on": "^9.1.0"
-  },
-  "build": {
-    "appId": "tw.interact.presenter.desktop",
-    "productName": "InterActPlus",
-    "artifactName": "InterActPlus.${ext}",
-    "directories": {
-      "output": "release"
-    },
-    "files": [
-      "dist/**/*",
-      "electron/**/*",
-      "package.json"
-    ],
-    "extraResources": [
-      {
-        "from": "build/icon.ico",
-        "to": "icon.ico"
-      }
-    ],
-    "win": {
-      "icon": "build/icon.ico",
-      "executableName": "InterActPlus",
-      "requestedExecutionLevel": "asInvoker",
-      "target": [
-        {
-          "target": "portable",
-          "arch": [
-            "x64"
-          ]
-        }
-      ]
-    },
-    "nsis": {
-      "allowElevation": false,
-      "installerIcon": "build/icon.ico",
-      "installerHeaderIcon": "build/icon.ico",
-      "packElevateHelper": false,
-      "perMachine": false,
-      "uninstallerIcon": "build/icon.ico"
-    },
-    "portable": {
-      "requestExecutionLevel": "user"
-    }
   }
 }
