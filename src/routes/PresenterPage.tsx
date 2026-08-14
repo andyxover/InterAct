@@ -21,6 +21,7 @@ import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
 import { buildJoinUrl } from '../lib/qrcode'
+import { isViewSonicBrand } from '../lib/brand'
 import { createRealtimeCaptionConnection } from '../lib/liveCaptions'
 import { createInterpretationAudioBroadcaster } from '../lib/liveInterpretation'
 import { createCaptionTextNormalizer } from '../lib/traditionalChinese'
@@ -128,7 +129,10 @@ export function PresenterPage() {
     if (audioContext.state !== 'running') void audioContext.resume()
     return audioContext
   }
-  const fallbackJoinUrl = useMemo(() => buildJoinUrl(session?.code || sessionId), [session?.code, sessionId])
+  const fallbackJoinUrl = useMemo(
+    () => buildJoinUrl(session?.code || sessionId, isViewSonicBrand ? 'viewsonic' : undefined),
+    [session?.code, sessionId],
+  )
   const [joinUrl, setJoinUrl] = useState(fallbackJoinUrl)
   const onlineParticipantIds = useSessionPresence(sessionId)
   const onlineParticipants = useMemo(
@@ -289,7 +293,7 @@ export function PresenterPage() {
 
   useEffect(() => {
     if (!session) return
-    const fallback = buildJoinUrl(session.code)
+    const fallback = buildJoinUrl(session.code, isViewSonicBrand ? 'viewsonic' : undefined)
     setJoinUrl(session.short_join_url || fallback)
     if (session.short_join_url) return
 

@@ -1,6 +1,8 @@
 import { QRCodeSVG } from 'qrcode.react'
 import { Minus, QrCode, X } from 'lucide-react'
 import type { HTMLAttributes } from 'react'
+import viewSonicLogo from '../assets/viewsonic-logo.png'
+import { isViewSonicBrand } from '../lib/brand'
 
 type Props = {
   joinUrl: string
@@ -14,7 +16,9 @@ export function QRCodePanel({ joinUrl, onClose, onMinimize, qrInteractionProps }
     <section className="panel qr-panel">
       <div className="panel-heading">
         <h2>
-          <span className="heading-icon"><QrCode size={16} /></span>加入場次
+          <span className="heading-icon">
+            {isViewSonicBrand ? <img alt="ViewSonic" className="qr-heading-logo" src={viewSonicLogo} /> : <QrCode size={16} />}
+          </span>加入場次
         </h2>
         {(onMinimize || onClose) && (
           <div

@@ -80,6 +80,12 @@ body {
   user-select: none;
 }
 
+.desktop-drag-handle .brand-logo {
+  height: 20px;
+  object-fit: contain;
+  width: auto;
+}
+
 .desktop-window-actions {
   -webkit-app-region: no-drag;
   align-items: center;
@@ -396,6 +402,12 @@ h2 {
 .heading-icon {
   height: 28px;
   width: 28px;
+}
+
+.qr-heading-logo {
+  height: 20px;
+  object-fit: contain;
+  width: 20px;
 }
 
 .metric-icon {
@@ -2241,6 +2253,12 @@ h2 {
 
 .student-social-link .youtube-play {
   fill: #fff;
+}
+
+.student-social-link.viewsonic img {
+  height: 30px;
+  object-fit: contain;
+  width: 30px;
 }
 
 .participant-header {

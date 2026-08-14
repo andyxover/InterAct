@@ -12,7 +12,9 @@ dist
 dist-ssr
 release
 /release-build/
-/interact.exe
+/InterAct.exe
+/InterActPlus.exe
+/VSInterAct.exe
 .codex-tmp/
 .env
 *.local

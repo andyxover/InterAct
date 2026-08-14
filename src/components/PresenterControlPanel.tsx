@@ -1,4 +1,5 @@
 import { AudioLines, BellRing, Captions, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Settings, Shapes, Sparkles, Square, Users } from 'lucide-react'
+import { isPlusEdition } from '../lib/edition'
 import type { Session } from '../types'
 
 type Props = {
@@ -70,15 +71,17 @@ export function PresenterControlPanel({
           >
             <Dice5 size={19} />
           </button>
-          <button
-            aria-label="教師端設定"
-            className="ghost-button metric-action"
-            title="課程錄製、字幕、即時口譯語音與麥克風設定"
-            type="button"
-            onClick={onOpenSettings}
-          >
-            <Settings size={19} />
-          </button>
+          {isPlusEdition && (
+            <button
+              aria-label="教師端設定"
+              className="ghost-button metric-action"
+              title="課程錄製、字幕、即時口譯語音與麥克風設定"
+              type="button"
+              onClick={onOpenSettings}
+            >
+              <Settings size={19} />
+            </button>
+          )}
         </div>
       </div>
 
@@ -127,16 +130,20 @@ export function PresenterControlPanel({
             <span className="control-action-icon"><Cloud size={18} /></span>
             彈幕文字雲
           </button>
-          <button className={`control-action caption-control-action${session.recording_enabled ? ' is-active' : ''}`} type="button" onClick={onToggleRecording} disabled={busy || session.caption_status === 'starting'}>
-            <span className="control-action-icon"><AudioLines size={18} /></span>
-            {session.caption_status === 'starting' ? '錄製連線中' : session.recording_enabled ? '停止課程錄製' : '開始課程錄製'}
-          </button>
-          <button className={`control-action caption-control-action${session.captions_enabled ? ' is-active' : ''}`} type="button" onClick={onToggleCaptionVisibility} disabled={busy || !session.recording_enabled || session.caption_status === 'starting'} title={session.recording_enabled ? '控制教師與學生端的即時字幕顯示' : '請先開啟課程錄製'}>
-            <span className="control-action-icon"><Captions size={18} /></span>
-            {session.captions_enabled ? '關閉字幕' : '開啟字幕'}
-          </button>
+          {isPlusEdition && (
+            <>
+              <button className={`control-action caption-control-action${session.recording_enabled ? ' is-active' : ''}`} type="button" onClick={onToggleRecording} disabled={busy || session.caption_status === 'starting'}>
+                <span className="control-action-icon"><AudioLines size={18} /></span>
+                {session.caption_status === 'starting' ? '錄製連線中' : session.recording_enabled ? '停止課程錄製' : '開始課程錄製'}
+              </button>
+              <button className={`control-action caption-control-action${session.captions_enabled ? ' is-active' : ''}`} type="button" onClick={onToggleCaptionVisibility} disabled={busy || !session.recording_enabled || session.caption_status === 'starting'} title={session.recording_enabled ? '控制教師與學生端的即時字幕顯示' : '請先開啟課程錄製'}>
+                <span className="control-action-icon"><Captions size={18} /></span>
+                {session.captions_enabled ? '關閉字幕' : '開啟字幕'}
+              </button>
+            </>
+          )}
         </div>
-        {captionError && <p className="error caption-control-error">{captionError}</p>}
+        {isPlusEdition && captionError && <p className="error caption-control-error">{captionError}</p>}
       </div>
 
       <div className="control-section">

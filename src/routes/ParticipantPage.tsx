@@ -1,7 +1,7 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles, Waves } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
 import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
 import type { QuizSubmission } from '../components/ParticipantCustomQuiz'
@@ -68,6 +68,7 @@ export function ParticipantPage() {
   const loadSequence = useRef(0)
   const loadedQuizQuestionId = useRef('')
   const navigate = useNavigate()
+  const location = useLocation()
   useSessionPresence(sessionId, session?.status === 'active' ? participant : null)
   const localizedSummary = locale === 'en' ? sessionSummary?.translations?.en || sessionSummary : sessionSummary
 
@@ -186,8 +187,8 @@ export function ParticipantPage() {
   }, [locale, participantId, participantToken, sessionId])
 
   useEffect(() => {
-    if (!participantId) navigate(`/join/${sessionId}`)
-  }, [navigate, participantId, sessionId])
+    if (!participantId) navigate(`/join/${sessionId}${location.search}`)
+  }, [location.search, navigate, participantId, sessionId])
 
   useEffect(() => {
     loadAll()

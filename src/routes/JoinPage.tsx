@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
 import { ArrowRight, UserRound } from 'lucide-react'
-import { useNavigate, useParams } from 'react-router-dom'
+import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { SetupNotice } from '../components/SetupNotice'
 import { StudentSocialLinks } from '../components/StudentSocialLinks'
 import { ParticipantLanguageSwitcher } from '../components/ParticipantLanguageSwitcher'
@@ -19,6 +19,7 @@ export function JoinPage() {
   const [busy, setBusy] = useState(false)
   const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
   const navigate = useNavigate()
+  const location = useLocation()
 
   function changeLocale(nextLocale: ParticipantLocale) {
     localStorage.setItem('interact_participant_locale', nextLocale)
@@ -63,7 +64,7 @@ export function JoinPage() {
       localStorage.setItem(`interact_participant_${sessionId}`, participant.id)
       localStorage.setItem(`interact_participant_token_${sessionId}`, data.participantToken)
       localStorage.setItem(`interact_name_${sessionId}`, participant.name)
-      navigate(`/participant/${sessionId}`)
+      navigate(`/participant/${sessionId}${location.search}`)
     } catch (err) {
       setError(err instanceof Error ? err.message : '加入失敗')
     } finally {
