@@ -18,6 +18,12 @@ function logFatalError(scope, error) {
 process.on('uncaughtException', (error) => logFatalError('uncaughtException', error))
 process.on('unhandledRejection', (reason) => logFatalError('unhandledRejection', reason))
 
+// This app hides/shows several BrowserWindows constantly (overlay keep-alive
+// every 750ms, presenter panel expand/collapse). Chromium's native window
+// occlusion tracking throttles rendering for windows it thinks are covered,
+// which fights that pattern; disable it like other frequently-hidden apps do.
+app.commandLine.appendSwitch('disable-features', 'CalculateNativeWinOcclusion')
+
 const isDesktopDev = process.env.INTERACT_DESKTOP_DEV === '1'
 const APP_USER_MODEL_ID = 'tw.interact.presenter.desktop'
 const APP_WINDOW_ICON_PATH = isDesktopDev
@@ -98,6 +104,7 @@ function createWindow() {
     maximizable: false,
     alwaysOnTop: false,
     skipTaskbar: false,
+    show: false,
     title: 'InterAct Presenter',
     icon: APP_WINDOW_ICON_PATH,
     backgroundColor: '#00000000',
@@ -108,6 +115,8 @@ function createWindow() {
       preload: path.join(__dirname, 'preload.cjs'),
     },
   })
+
+  mainWindow.once('ready-to-show', () => mainWindow?.show())
 
   mainWindow.setAppDetails({
     appId: APP_USER_MODEL_ID,

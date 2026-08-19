@@ -1,6 +1,4 @@
 import { ArrowLeft, GripHorizontal, Minus, X } from 'lucide-react'
-import viewSonicLogo from '../assets/viewsonic-logo.png'
-import { isViewSonicBrand } from '../lib/brand'
 
 interface DesktopWindowChromeProps {
   confirmClose?: boolean
@@ -22,7 +20,7 @@ export function DesktopWindowChrome({ confirmClose = true, onBack }: DesktopWind
     <header className="desktop-window-chrome">
       <div className="desktop-drag-handle" title="拖曳視窗">
         <GripHorizontal size={16} />
-        {isViewSonicBrand ? <img alt="ViewSonic" className="brand-logo" src={viewSonicLogo} /> : <span>InterAct</span>}
+        <span>InterAct</span>
       </div>
       <div className="desktop-window-actions">
         {onBack && (

@@ -13,9 +13,11 @@ dist-ssr
 release
 /release-build/
 /InterAct.exe
-/InterActPlus.exe
-/VSInterAct.exe
+/InterAct.zip
+# Locally extracted zip build kept around to run directly.
+/InterAct/
 .codex-tmp/
+supabase/.temp/
 .env
 *.local
 

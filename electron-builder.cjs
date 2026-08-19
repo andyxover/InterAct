@@ -1,17 +1,7 @@
-// APP_EDITION selects which Windows app gets built:
-//   plus     (default) -> InterActPlus.exe, with live captions and interpretation.
-//   standard           -> InterAct.exe, screenshot interaction only.
-// APP_BRAND=viewsonic builds the ViewSonic campaign variant (VSInterAct.exe)
-// instead, regardless of edition, with its own appId so it keeps separate
-// userData/crash.log from the other two builds.
-const edition = process.env.APP_EDITION === 'standard' ? 'standard' : 'plus'
-const isViewSonicBrand = process.env.APP_BRAND === 'viewsonic'
-const productName = isViewSonicBrand ? 'VSInterAct' : edition === 'standard' ? 'InterAct' : 'InterActPlus'
-
 module.exports = {
-  appId: isViewSonicBrand ? 'tw.interact.presenter.viewsonic' : 'tw.interact.presenter.desktop',
-  productName,
-  artifactName: `${productName}.\${ext}`,
+  appId: 'tw.interact.presenter.desktop',
+  productName: 'InterAct',
+  artifactName: `InterAct.\${ext}`,
   directories: {
     output: 'release',
   },
@@ -19,7 +9,14 @@ module.exports = {
     'dist/**/*',
     'electron/**/*',
     'package.json',
+    // package.json's dependencies are renderer-only libraries already
+    // bundled into dist/**/*.js by Vite; electron/*.cjs only requires
+    // electron/node:path/node:fs, so none of node_modules ever runs.
+    '!node_modules/**/*',
   ],
+  // The UI only ships zh-TW and en-US strings; without this, electron-builder
+  // bundles all ~55 Chromium locale .pak files (~49MB of unused languages).
+  electronLanguages: ['en-US', 'zh-TW'],
   extraResources: [
     {
       from: 'build/icon.ico',
@@ -28,11 +25,18 @@ module.exports = {
   ],
   win: {
     icon: 'build/icon.ico',
-    executableName: productName,
+    executableName: 'InterAct',
     requestedExecutionLevel: 'asInvoker',
     target: [
       {
         target: 'portable',
+        arch: ['x64'],
+      },
+      // Unlike portable, which re-extracts its full payload to a temp folder
+      // on every launch (~10s), this zip is unpacked once and the exe inside
+      // then starts directly (~2s) on every subsequent run.
+      {
+        target: 'zip',
         arch: ['x64'],
       },
     ],

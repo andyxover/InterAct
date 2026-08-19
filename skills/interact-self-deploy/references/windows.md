@@ -1,24 +1,18 @@
 # Windows Portable App
 
-The desktop executable contains the public Supabase URL, publishable key, and GitHub Pages URL at build time. It contains no Gemini, Reurl, or OpenAI secret. Rebuild the executable for every instructor's deployment.
+Windows 執行檔會在建置時包含公開的 Supabase URL、publishable key 與 GitHub Pages URL，不包含 Gemini 或 Reurl secret。每位講師都必須針對自己的部署重新打包。
 
-There are two editions. Pick one with `-Edition`:
-
-- `plus` (default) — builds `InterActPlus.exe`: screenshot interaction plus live captions and interpretation. Requires the [OpenAI Realtime deployment](openai.md) step.
-- `standard` — builds `InterAct.exe`: screenshot interaction only, no captions/interpretation UI at all. Skip the OpenAI step entirely.
-
-Run:
+執行：
 
 ```powershell
 powershell -ExecutionPolicy Bypass -File .\skills\interact-self-deploy\scripts\package-windows.ps1 `
   -SupabaseUrl https://PROJECT_REF.supabase.co `
   -PublishableKey sb_publishable_xxx `
-  -PublicAppUrl https://OWNER.github.io/REPOSITORY `
-  -Edition plus
+  -PublicAppUrl https://OWNER.github.io/REPOSITORY
 ```
 
-The script writes the local ignored `.env`, installs locked dependencies, builds the frontend for the chosen edition, packages a portable x64 Windows app in the local temp directory, and copies `InterActPlus.exe` or `InterAct.exe` to the repository root. Run it twice (once per `-Edition`) to produce both executables.
+腳本會建立本機且被 Git 忽略的 `.env`、安裝鎖定版本的相依套件、建置前端、打包 Windows x64 portable app，最後把 `InterAct.exe` 複製到專案根目錄。
 
 ## Checkpoint
 
-Open the resulting exe, create a session, and scan its QR code with a device not connected to the presenter's network. Confirm the URL points to the new GitHub Pages site and the session data appears only in the new Supabase project. For the `plus` edition, also confirm the settings gear and live-caption buttons appear in the control panel; for `standard`, confirm they do not.
+開啟 `InterAct.exe` 建立場次，使用不同網路的手機掃描 QR Code。確認網址指向自己的 GitHub Pages，且新場次只出現在自己的 Supabase 專案。

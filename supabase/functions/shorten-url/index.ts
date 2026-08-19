@@ -31,9 +31,7 @@ Deno.serve(async (req) => {
     if (session.short_join_url) return jsonResponse({ shortUrl: session.short_join_url, cached: true })
 
     const parsedUrl = new URL(longUrl)
-    const [hashPath, hashQuery] = parsedUrl.hash.split('?')
-    const hasValidQuery = hashQuery === undefined || hashQuery === 'brand=viewsonic'
-    if (parsedUrl.protocol !== 'https:' || hashPath !== `#/join/${session.code}` || !hasValidQuery) {
+    if (parsedUrl.protocol !== 'https:' || parsedUrl.hash !== `#/join/${session.code}`) {
       return jsonResponse({ message: '加入網址格式不正確。' }, 400)
     }
 

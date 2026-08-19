@@ -5,7 +5,6 @@ import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
 import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
 import type { QuizSubmission } from '../components/ParticipantCustomQuiz'
-import { ParticipantInterpretationAudio } from '../components/ParticipantInterpretationAudio'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { ExitTicketForm } from '../components/ExitTicketForm'
 import { LotteryOverlay } from '../components/LotteryOverlay'
@@ -527,14 +526,6 @@ export function ParticipantPage() {
           <strong>{participant?.name || participantText(locale, 'attendee')}</strong>{locale === 'en' ? participantText(locale, 'welcome') : `，${participantText(locale, 'welcome')}`}{session?.title || participantText(locale, 'session')}
         </h1>
       </header>
-      {session && (
-        <ParticipantInterpretationAudio
-          enabled={session.interpretation_enabled && session.interpretation_audio_enabled}
-          languages={session.interpretation_languages}
-          sessionId={sessionId}
-          locale={locale}
-        />
-      )}
       {session?.exit_ticket_prompt && session.exit_ticket_category && (
         <div className="participant-exit-ticket-priority">
           <ExitTicketForm

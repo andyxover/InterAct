@@ -1,7 +1,3 @@
-import { useSearchParams } from 'react-router-dom'
-import viewSonicLogo from '../assets/viewsonic-logo.png'
-import { isViewSonicBrand } from '../lib/brand'
-
 const socialLinks = [
   {
     href: 'https://www.facebook.com/lienyujen',
@@ -25,28 +21,6 @@ const socialLinks = [
 ]
 
 export function StudentSocialLinks() {
-  const [searchParams] = useSearchParams()
-  // The participant web app is one shared GitHub Pages deployment used by every
-  // exe edition, so the build-time brand flag (meaningful for the desktop app)
-  // can't select branding here. The presenter's join URL carries ?brand=viewsonic
-  // instead, forwarded across navigations, so this checks that at runtime.
-  if (isViewSonicBrand || searchParams.get('brand') === 'viewsonic') {
-    return (
-      <nav aria-label="ViewSonic" className="student-social-links">
-        <a
-          aria-label="在新分頁開啟 ViewSonic Taiwan"
-          className="student-social-link viewsonic"
-          href="https://www.viewsonic.com/tw/"
-          rel="noopener noreferrer"
-          target="_blank"
-          title="ViewSonic Taiwan"
-        >
-          <img alt="ViewSonic" src={viewSonicLogo} />
-        </a>
-      </nav>
-    )
-  }
-
   return (
     <nav aria-label="講師社群連結" className="student-social-links">
       {socialLinks.map((link) => (
