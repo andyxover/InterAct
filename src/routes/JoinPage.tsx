@@ -1,13 +1,13 @@
 import { useEffect, useState } from 'react'
 import type { FormEvent } from 'react'
-import { ArrowRight, UserRound } from 'lucide-react'
+import { ArrowRight, UserRound, Waves } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { SetupNotice } from '../components/SetupNotice'
 import { StudentSocialLinks } from '../components/StudentSocialLinks'
 import { ParticipantLanguageSwitcher } from '../components/ParticipantLanguageSwitcher'
 import { getDeviceId } from '../lib/device'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
-import { participantLocaleFromStorage } from '../lib/participantI18n'
+import { participantLocaleFromStorage, participantText } from '../lib/participantI18n'
 import type { ParticipantLocale } from '../lib/participantI18n'
 import type { Participant, Session } from '../types'
 
@@ -17,6 +17,8 @@ export function JoinPage() {
   const [name, setName] = useState('')
   const [error, setError] = useState('')
   const [busy, setBusy] = useState(false)
+  const [sessionChecked, setSessionChecked] = useState(false)
+  const [sessionLookupError, setSessionLookupError] = useState('')
   const [locale, setLocale] = useState<ParticipantLocale>(participantLocaleFromStorage)
   const navigate = useNavigate()
   const location = useLocation()
@@ -29,14 +31,38 @@ export function JoinPage() {
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionReference) return
 
+    let cancelled = false
+    setSessionChecked(false)
+    setSessionLookupError('')
     const isSessionId = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(sessionReference)
     requireSupabase()
       .from('sessions')
       .select('*')
       .eq(isSessionId ? 'id' : 'code', sessionReference)
-      .single()
-      .then(({ data }) => setSession(data as Session | null))
-  }, [sessionReference])
+      .maybeSingle()
+      .then(({ data, error: lookupError }) => {
+        if (cancelled) return
+        setSession((data as Session | null) || null)
+        setSessionLookupError(lookupError ? (locale === 'en' ? 'Unable to load this session. Please refresh and try again.' : '暫時無法載入場次，請重新整理後再試。') : '')
+        setSessionChecked(true)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [locale, sessionReference])
+
+  async function joinErrorMessage(joinError: unknown) {
+    const response = (joinError as { context?: Response } | null)?.context
+    if (response) {
+      try {
+        const payload = await response.clone().json() as { message?: unknown }
+        if (typeof payload.message === 'string' && payload.message.trim()) return payload.message.trim()
+      } catch {
+        // Fall through to the normal error message.
+      }
+    }
+    return joinError instanceof Error ? joinError.message : (locale === 'en' ? 'Unable to join.' : '加入失敗。')
+  }
 
   async function join(event: FormEvent) {
     event.preventDefault()
@@ -50,13 +76,12 @@ export function JoinPage() {
     setError('')
     try {
       if (!session) throw new Error(locale === 'en' ? 'Session not found.' : '找不到這個場次。')
-      if (session.status !== 'active') throw new Error(locale === 'en' ? 'This class has ended and can no longer be joined.' : '這堂課已經結束，無法再加入。')
       const supabase = requireSupabase()
       const deviceId = getDeviceId()
       const { data, error: joinError } = await supabase.functions.invoke('participant-action', {
         body: { action: 'join_session', sessionReference, name: trimmed, deviceId },
       })
-      if (joinError) throw joinError
+      if (joinError) throw new Error(await joinErrorMessage(joinError))
       if (!data?.participant || !data?.participantToken) throw new Error(data?.message || '加入失敗。')
       const participant = data.participant as Participant
       const sessionId = participant.session_id
@@ -66,21 +91,28 @@ export function JoinPage() {
       localStorage.setItem(`interact_name_${sessionId}`, participant.name)
       navigate(`/participant/${sessionId}${location.search}`)
     } catch (err) {
-      setError(err instanceof Error ? err.message : '加入失敗')
+      const message = err instanceof Error ? err.message : '加入失敗'
+      if (message.includes('找不到這個場次') || message.includes('Session not found')) {
+        setSession(null)
+        setSessionChecked(true)
+      } else {
+        setError(message)
+      }
     } finally {
       setBusy(false)
     }
   }
 
-  if (session?.status === 'ended') {
+  if (sessionChecked && !session && !sessionLookupError) {
     return (
-      <main className="center-page">
+      <main className="participant-page participant-ended-page">
         <ParticipantLanguageSwitcher locale={locale} onChange={changeLocale} />
         <SetupNotice />
         <StudentSocialLinks />
-        <section className="panel form-panel session-closed-card">
-          <h1>{locale === 'en' ? 'Class ended' : '下課啦！'}</h1>
-          <p className="muted">{locale === 'en' ? 'This class has ended. You can no longer join or submit content.' : '這堂課已經結束，無法再加入或送出內容。'}</p>
+        <section className="participant-ended-hero">
+          <span className="participant-ended-icon"><Waves size={34} /></span>
+          <h1>{participantText(locale, 'sessionGoneTitle')}</h1>
+          <p>{participantText(locale, 'sessionGoneMessage')}</p>
         </section>
       </main>
     )
@@ -94,7 +126,9 @@ export function JoinPage() {
       <form autoComplete="off" className="panel form-panel" onSubmit={join}>
         <span className="form-heading-icon"><UserRound size={24} /></span>
         <h1>{locale === 'en' ? `Join ${session?.title || 'session'}` : `加入${session?.title || '場次'}`}</h1>
-        <p className="muted">{locale === 'en' ? 'Enter your name to join the interactive class' : '輸入姓名後即可進入互動課堂'}</p>
+        <p className="muted">{session?.status === 'ended'
+          ? (locale === 'en' ? 'Enter your name to view the class materials' : '輸入姓名即可查看課程內容')
+          : (locale === 'en' ? 'Enter your name to join the interactive class' : '輸入姓名後即可進入互動課堂')}</p>
         <label>
           {locale === 'en' ? 'Your name' : '你的姓名'}
           <input
@@ -107,9 +141,13 @@ export function JoinPage() {
             placeholder={locale === 'en' ? 'Enter your name' : '請輸入姓名'}
           />
         </label>
-        {error && <p className="error">{error}</p>}
-        <button disabled={busy} type="submit">
-          {busy ? (locale === 'en' ? 'Joining...' : '加入中...') : (locale === 'en' ? 'Join' : '加入')}
+        {(error || sessionLookupError) && <p className="error">{error || sessionLookupError}</p>}
+        <button disabled={busy || !session || Boolean(sessionLookupError)} type="submit">
+          {busy
+            ? (locale === 'en' ? 'Joining...' : '加入中...')
+            : session?.status === 'ended'
+              ? (locale === 'en' ? 'View class' : '查看課程')
+              : (locale === 'en' ? 'Join' : '加入')}
           {!busy && <ArrowRight size={18} />}
         </button>
       </form>

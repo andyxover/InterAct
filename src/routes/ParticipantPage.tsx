@@ -70,6 +70,7 @@ export function ParticipantPage() {
   const location = useLocation()
   useSessionPresence(sessionId, session?.status === 'active' ? participant : null)
   const localizedSummary = locale === 'en' ? sessionSummary?.translations?.en || sessionSummary : sessionSummary
+  const participantName = participant?.name || localStorage.getItem(`interact_name_${sessionId}`) || ''
 
   function changeLocale(nextLocale: ParticipantLocale) {
     localStorage.setItem('interact_participant_locale', nextLocale)
@@ -444,7 +445,7 @@ export function ParticipantPage() {
           <span className="participant-ended-icon"><PartyPopper size={34} /></span>
           <p className="eyebrow">{participantText(locale, 'courseEnded')}</p>
           <h1>{participantText(locale, 'classDismissed')}</h1>
-          <p>{participant?.name ? `${participant.name}${locale === 'en' ? ', ' : '，'}${participantText(locale, 'thankYou')}` : participantText(locale, 'thankYou')}</p>
+          <p>{participantName ? `${participantName}${locale === 'en' ? ', ' : '，'}${participantText(locale, 'thankYou')}` : participantText(locale, 'thankYou')}</p>
         </section>
         {sessionSummary && (
           <section className="panel participant-summary-panel" aria-live="polite">

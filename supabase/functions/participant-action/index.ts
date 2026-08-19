@@ -54,7 +54,24 @@ Deno.serve(async (req) => {
         .maybeSingle()
       if (sessionError) throw sessionError
       if (!session) return jsonResponse({ message: '找不到這個場次。' }, 404)
-      if (session.status !== 'active') return jsonResponse({ message: '這堂課已經結束，無法再加入。' }, 409)
+      if (!['active', 'ended'].includes(session.status)) return jsonResponse({ message: '這個場次目前無法加入。' }, 409)
+
+      if (session.status === 'ended') {
+        const now = new Date().toISOString()
+        return jsonResponse({
+          session,
+          readOnly: true,
+          participant: {
+            id: crypto.randomUUID(),
+            session_id: session.id,
+            name,
+            device_id: deviceId,
+            joined_at: now,
+            last_seen_at: now,
+          },
+          participantToken: `${crypto.randomUUID()}${crypto.randomUUID()}`.replaceAll('-', ''),
+        })
+      }
 
       const { data: existing, error: existingError } = await supabase
         .from('participants')
