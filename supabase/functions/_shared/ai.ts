@@ -24,6 +24,7 @@ async function wait(milliseconds: number) {
 export async function callAiJson(systemPrompt: string, userPayload: unknown, schema?: Record<string, unknown>) {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
   const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
+  const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.6-flash'
 
   if (!apiKey) {
     return {
@@ -32,42 +33,44 @@ export async function callAiJson(systemPrompt: string, userPayload: unknown, sch
     }
   }
 
-  let response: Response | null = null
   let failureMessage = 'AI request failed.'
-  for (let attempt = 0; attempt < 2; attempt += 1) {
-    try {
-      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'x-goog-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          systemInstruction: { parts: [{ text: systemPrompt }] },
-          contents: [{ role: 'user', parts: [{ text: JSON.stringify(userPayload) }] }],
-          generationConfig: {
-            responseFormat: { text: { mimeType: 'APPLICATION_JSON', ...(schema ? { schema } : {}) } },
+  let response: Response | null = null
+  const models = fallbackModel !== model ? [model, fallbackModel] : [model]
+  for (const currentModel of models) {
+    const attempts = currentModel === model ? 1 : 2
+    for (let attempt = 0; attempt < attempts; attempt += 1) {
+      try {
+        const candidate = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`, {
+          method: 'POST',
+          headers: {
+            'x-goog-api-key': apiKey,
+            'Content-Type': 'application/json',
           },
-        }),
-        signal: AbortSignal.timeout(55_000),
-      })
-      if (response.ok) break
-      const detail = (await response.text()).slice(0, 1000)
-      failureMessage = detail || `AI request failed with status ${response.status}.`
-      if (attempt === 0 && retryableStatus(response.status)) {
-        response = null
-        await wait(1200)
-        continue
+          body: JSON.stringify({
+            systemInstruction: { parts: [{ text: systemPrompt }] },
+            contents: [{ role: 'user', parts: [{ text: JSON.stringify(userPayload) }] }],
+            generationConfig: {
+              responseFormat: { text: { mimeType: 'APPLICATION_JSON', ...(schema ? { schema } : {}) } },
+            },
+          }),
+          signal: AbortSignal.timeout(currentModel === model ? 40_000 : 50_000),
+        })
+        if (candidate.ok) {
+          response = candidate
+          break
+        }
+        const detail = (await candidate.text()).slice(0, 1000)
+        failureMessage = detail || `AI request failed with status ${candidate.status}.`
+        if (!retryableStatus(candidate.status)) return { status: 'failed', output: { message: failureMessage } }
+      } catch (error) {
+        failureMessage = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+          ? 'AI request timed out.'
+          : 'AI request failed.'
       }
-      break
-    } catch (error) {
-      failureMessage = error instanceof Error && error.name === 'TimeoutError' ? 'AI request timed out.' : 'AI request failed.'
-      response = null
-      if (attempt === 0) {
-        await wait(1200)
-        continue
-      }
+      if (attempt < attempts - 1) await wait(1200)
     }
+    if (response) break
+    if (currentModel !== models.at(-1)) console.warn(`Gemini unavailable on ${currentModel}; retrying with ${fallbackModel}.`)
   }
 
   if (!response?.ok) {
