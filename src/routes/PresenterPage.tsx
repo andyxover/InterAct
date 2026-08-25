@@ -542,7 +542,20 @@ export function PresenterPage() {
       const { data, error } = await requireSupabase().functions.invoke('analyze-question', {
         body: { sessionId, questionId: question.id, presenterToken },
       })
-      if (error) throw error
+      if (error) {
+        const response = (error as Error & { context?: Response }).context
+        let responseMessage = ''
+        if (response) {
+          try {
+            const payload = await response.clone().json() as { message?: unknown }
+            if (typeof payload.message === 'string') responseMessage = payload.message.trim()
+          } catch {
+            // Use the SDK message when the response is not JSON.
+          }
+        }
+        if (responseMessage) throw new Error(responseMessage)
+        throw error
+      }
       if (!data?.analysis) throw new Error(data?.message || 'AI 沒有回傳分析結果。')
       setAnalysis(data.analysis as QuestionAnalysis)
     } catch (error) {

@@ -65,8 +65,38 @@ function extractGeminiText(response: Record<string, unknown>) {
   return firstCandidate?.content?.parts?.map((part) => part.text || '').join('') || ''
 }
 
-function wait(milliseconds: number) {
-  return new Promise((resolve) => setTimeout(resolve, milliseconds))
+function retryableStatus(status: number) {
+  return status === 408 || status === 429 || status >= 500
+}
+
+async function requestAnalysis(apiKey: string, models: string[], body: string) {
+  let failureMessage = 'Gemini request failed.'
+
+  for (const model of models) {
+    let response: Response
+    try {
+      response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal: AbortSignal.timeout(20_000),
+      })
+    } catch (error) {
+      failureMessage = error instanceof Error ? error.message : 'Gemini request failed.'
+      console.warn(`Question analysis request failed on ${model}; trying the fallback model.`)
+      continue
+    }
+
+    if (response.ok) return response
+    failureMessage = (await response.text()).slice(0, 1000) || `Gemini request failed (${response.status}).`
+    if (!retryableStatus(response.status)) throw new Error(failureMessage)
+    console.warn(`Question analysis unavailable on ${model}; trying the fallback model.`)
+  }
+
+  throw new Error(failureMessage)
 }
 
 Deno.serve(async (req) => {
@@ -140,7 +170,8 @@ Deno.serve(async (req) => {
     }
 
     const geminiKey = Deno.env.get('GEMINI_API_KEY')
-    const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
+    const realtimeModel = Deno.env.get('GEMINI_REALTIME_MODEL') || 'gemini-3.6-flash'
+    const fallbackModel = Deno.env.get('GEMINI_REALTIME_FALLBACK_MODEL') || 'gemini-3.5-flash'
     if (!geminiKey) return jsonResponse({ message: 'Supabase 尚未設定 GEMINI_API_KEY。' }, 503)
 
     const imageResponse = await fetch(screenshot.public_url)
@@ -167,41 +198,15 @@ Deno.serve(async (req) => {
       // responseFormat uses JSON Schema on Gemini 3.x and Gemini 2.5. The
       // legacy responseSchema field uses a restricted dialect and rejects
       // keywords such as additionalProperties and nullable type arrays.
-      const generationConfig = { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: analysisSchema } } }
+      const generationConfig = {
+        thinkingConfig: { thinkingLevel: 'LOW' },
+        responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: analysisSchema } },
+      }
       return JSON.stringify({ ...requestPayload, generationConfig })
     }
 
-    let geminiResponse: Response | null = null
-    let requestError: unknown = null
-    for (let attempt = 0; attempt < 3; attempt += 1) {
-      try {
-        geminiResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-          method: 'POST',
-          headers: {
-            'x-goog-api-key': geminiKey,
-            'Content-Type': 'application/json',
-          },
-          body: requestBodyForModel(),
-          signal: AbortSignal.timeout(35_000),
-        })
-        if (geminiResponse.ok || ![408, 429, 500, 502, 503, 504].includes(geminiResponse.status) || attempt === 2) break
-        await geminiResponse.body?.cancel()
-      } catch (error) {
-        requestError = error
-        geminiResponse = null
-        if (attempt === 2) break
-      }
-      await wait(900 * (2 ** attempt) + Math.floor(Math.random() * 400))
-    }
-
-    if (!geminiResponse) {
-      throw new Error(requestError instanceof Error ? requestError.message : 'Gemini request failed.')
-    }
-
-    if (!geminiResponse.ok) {
-      const detail = (await geminiResponse.text()).slice(0, 1000)
-      throw new Error(`Gemini request failed (${geminiResponse.status}): ${detail}`)
-    }
+    const models = fallbackModel === realtimeModel ? [realtimeModel] : [realtimeModel, fallbackModel]
+    const geminiResponse = await requestAnalysis(geminiKey, models, requestBodyForModel())
 
     const geminiData = await geminiResponse.json()
     const outputText = extractGeminiText(geminiData)
