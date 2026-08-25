@@ -1,4 +1,5 @@
 import { getAdminClient } from './supabase.ts'
+import { geminiThinkingConfig, requestGemini } from './ai.ts'
 
 const audioAnalysisCoreSchema = {
   type: 'object',
@@ -58,10 +59,6 @@ export async function analyzeAudioResponse(input: {
   audioBytes: Uint8Array
   audioMimeType: string
 }) {
-  const apiKey = Deno.env.get('GEMINI_API_KEY')
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
-  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
-
   const imageResponse = await fetch(input.screenshotUrl)
   if (!imageResponse.ok) throw new Error(`Could not download screenshot (${imageResponse.status}).`)
   const imageBytes = new Uint8Array(await imageResponse.arrayBuffer())
@@ -71,10 +68,7 @@ export async function analyzeAudioResponse(input: {
     ? '這是發音正確度評測。先從題目文字與截圖推斷應朗讀的內容，再自動辨識錄音語言，評估讀音、流暢度、漏讀、誤讀與可理解度。relevance 請描述錄音與指定朗讀內容的一致性，completeness 請描述是否完整朗讀。'
     : '這是口語回應評測。先從題目文字與截圖判讀問題，再自動辨識錄音語言，評估回答與問題的關聯性、表達清楚度與內容完整度；不要把口音本身視為錯誤。'
 
-  const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-    method: 'POST',
-    headers: { 'x-goog-api-key': apiKey, 'Content-Type': 'application/json' },
-    body: JSON.stringify({
+  const response = await requestGemini(JSON.stringify({
       systemInstruction: {
         parts: [{
           text: `你是 InterAct 的口語學習評測助理。請先使用繁體中文提供具體、尊重且可行的個別回饋，再於 translations.en 提供結構相同且忠實的英文翻譯；英文版不可另行評分或推論。${modeInstruction} transcript 必須忠實轉寫學員實際說出的內容。score 為 0 到 100 的整體表現分數。若音質不足、語音太短或無法辨識，請保守評分並在 limitations 說明，不可捏造內容。`,
@@ -89,16 +83,10 @@ export async function analyzeAudioResponse(input: {
         ],
       }],
       generationConfig: {
+        thinkingConfig: geminiThinkingConfig('realtime'),
         responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: audioAnalysisSchema } },
       },
-    }),
-    signal: AbortSignal.timeout(60_000),
-  })
-
-  if (!response.ok) {
-    const detail = (await response.text()).slice(0, 1000)
-    throw new Error(`Gemini audio request failed (${response.status}): ${detail}`)
-  }
+    }), 'realtime', { primaryTimeoutMs: 25_000, fallbackTimeoutMs: 25_000 })
   const output = extractText(await response.json())
   if (!output) throw new Error('Gemini returned no audio analysis.')
   return JSON.parse(output)

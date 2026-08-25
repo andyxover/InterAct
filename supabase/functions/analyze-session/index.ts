@@ -313,6 +313,7 @@ Deno.serve(async (req) => {
       '你是 InterAct 的課堂互動與形成性評量分析顧問。請先以繁體中文根據匿名化統計、講師派送的課程文字與連結、彈幕內容、每題作答結果、錄音評測、既有題目分析與 Exit Ticket，產生可供講者課後使用的完整報告；再於 translations.en 輸出結構相同、證據與意義一致的自然英文版本。英文版本是翻譯，不可另行推論。錄音題的 audio_evaluations 包含匿名化逐字稿、分數及個別 AI 評語，必須納入該題的 result_summary、evidence 與整體學習分析。自訂測驗的 custom_quiz 包含題目、選項、正確答案、匿名化學生答案、得分與回饋，必須逐題分析其答題表現、錯誤與迷思，並納入對應的 question_findings；只要 attempts 有資料，就不可把該測驗判斷為無人作答。instructor_shared_contents 是講師提供的課程參考資料。所有結論都要指出資料證據；資料不足時必須寫入 limitations。不可推測學生身分，也不可把投票題當成對錯題。question_findings 的 question_id 必須原樣使用輸入中的 ID 以供系統對應，但不可在其他文字欄位中顯示或解釋 ID。',
       summaryInput,
       sessionAnalysisSchema,
+      'deep',
     )
     if (result.status !== 'success') throw new Error(JSON.stringify(result.output).slice(0, 1000))
     result.output.lesson_key_points = []

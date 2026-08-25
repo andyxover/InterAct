@@ -22,6 +22,7 @@ async function translateQuestion(title: string, promptText: string, options: str
     'Translate this instructor-authored classroom question into concise, natural English. Preserve names, numbers, formulas, meaning, option order, and the number of options exactly. Do not answer, explain, summarize, or add content. Return only the requested JSON.',
     { title, prompt_text: promptText, options },
     questionTranslationSchema,
+    'realtime',
   )
   if (result.status !== 'success') return {}
   const translated = result.output as { title?: string; prompt_text?: string; options?: string[] }

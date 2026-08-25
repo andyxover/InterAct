@@ -13,18 +13,85 @@ export function jsonResponse(body: unknown, status = 200) {
   })
 }
 
+export type AiProfile = 'realtime' | 'deep'
+
+type GeminiRequestOptions = {
+  primaryTimeoutMs?: number
+  fallbackTimeoutMs?: number
+}
+
 function retryableStatus(status: number) {
   return status === 408 || status === 429 || status >= 500
 }
 
-async function wait(milliseconds: number) {
-  await new Promise((resolve) => setTimeout(resolve, milliseconds))
+export function geminiModels(profile: AiProfile) {
+  if (profile === 'deep') {
+    const primary = Deno.env.get('GEMINI_DEEP_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.7-flash'
+    const fallback = Deno.env.get('GEMINI_DEEP_FALLBACK_MODEL') || Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.6-flash'
+    return fallback === primary ? [primary] : [primary, fallback]
+  }
+
+  const primary = Deno.env.get('GEMINI_REALTIME_MODEL') || 'gemini-3.6-flash'
+  const fallback = Deno.env.get('GEMINI_REALTIME_FALLBACK_MODEL') || 'gemini-3.5-flash'
+  return fallback === primary ? [primary] : [primary, fallback]
 }
 
-export async function callAiJson(systemPrompt: string, userPayload: unknown, schema?: Record<string, unknown>) {
+export function geminiThinkingConfig(profile: AiProfile) {
+  return { thinkingLevel: profile === 'deep' ? 'MEDIUM' : 'LOW' }
+}
+
+export async function requestGemini(
+  body: string,
+  profile: AiProfile,
+  options: GeminiRequestOptions = {},
+) {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
-  const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.6-flash'
+  if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
+
+  const models = geminiModels(profile)
+  const primaryTimeoutMs = options.primaryTimeoutMs ?? (profile === 'deep' ? 90_000 : 12_000)
+  const fallbackTimeoutMs = options.fallbackTimeoutMs ?? (profile === 'deep' ? 60_000 : 18_000)
+  let failureMessage = 'AI request failed.'
+
+  for (const [index, model] of models.entries()) {
+    try {
+      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+        method: 'POST',
+        headers: {
+          'x-goog-api-key': apiKey,
+          'Content-Type': 'application/json',
+        },
+        body,
+        signal: AbortSignal.timeout(index === 0 ? primaryTimeoutMs : fallbackTimeoutMs),
+      })
+      if (response.ok) return response
+
+      failureMessage = (await response.text()).slice(0, 1000) || `AI request failed with status ${response.status}.`
+      if (!retryableStatus(response.status)) {
+        const nonRetryableError = new Error(failureMessage)
+        nonRetryableError.name = 'NonRetryableGeminiError'
+        throw nonRetryableError
+      }
+    } catch (error) {
+      if (error instanceof Error && error.name === 'NonRetryableGeminiError') throw error
+      failureMessage = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+        ? `AI request timed out on ${model}.`
+        : error instanceof Error ? error.message : 'AI request failed.'
+    }
+
+    if (index < models.length - 1) console.warn(`Gemini unavailable on ${model}; switching to ${models[index + 1]}.`)
+  }
+
+  throw new Error(failureMessage)
+}
+
+export async function callAiJson(
+  systemPrompt: string,
+  userPayload: unknown,
+  schema?: Record<string, unknown>,
+  profile: AiProfile = 'realtime',
+) {
+  const apiKey = Deno.env.get('GEMINI_API_KEY')
 
   if (!apiKey) {
     return {
@@ -33,48 +100,18 @@ export async function callAiJson(systemPrompt: string, userPayload: unknown, sch
     }
   }
 
-  let failureMessage = 'AI request failed.'
-  let response: Response | null = null
-  const models = fallbackModel !== model ? [model, fallbackModel] : [model]
-  for (const currentModel of models) {
-    const attempts = currentModel === model ? 1 : 2
-    for (let attempt = 0; attempt < attempts; attempt += 1) {
-      try {
-        const candidate = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(currentModel)}:generateContent`, {
-          method: 'POST',
-          headers: {
-            'x-goog-api-key': apiKey,
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            systemInstruction: { parts: [{ text: systemPrompt }] },
-            contents: [{ role: 'user', parts: [{ text: JSON.stringify(userPayload) }] }],
-            generationConfig: {
-              responseFormat: { text: { mimeType: 'APPLICATION_JSON', ...(schema ? { schema } : {}) } },
-            },
-          }),
-          signal: AbortSignal.timeout(currentModel === model ? 40_000 : 50_000),
-        })
-        if (candidate.ok) {
-          response = candidate
-          break
-        }
-        const detail = (await candidate.text()).slice(0, 1000)
-        failureMessage = detail || `AI request failed with status ${candidate.status}.`
-        if (!retryableStatus(candidate.status)) return { status: 'failed', output: { message: failureMessage } }
-      } catch (error) {
-        failureMessage = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
-          ? 'AI request timed out.'
-          : 'AI request failed.'
-      }
-      if (attempt < attempts - 1) await wait(1200)
-    }
-    if (response) break
-    if (currentModel !== models.at(-1)) console.warn(`Gemini unavailable on ${currentModel}; retrying with ${fallbackModel}.`)
-  }
-
-  if (!response?.ok) {
-    return { status: 'failed', output: { message: failureMessage } }
+  let response: Response
+  try {
+    response = await requestGemini(JSON.stringify({
+      systemInstruction: { parts: [{ text: systemPrompt }] },
+      contents: [{ role: 'user', parts: [{ text: JSON.stringify(userPayload) }] }],
+      generationConfig: {
+        thinkingConfig: geminiThinkingConfig(profile),
+        responseFormat: { text: { mimeType: 'APPLICATION_JSON', ...(schema ? { schema } : {}) } },
+      },
+    }), profile)
+  } catch (error) {
+    return { status: 'failed', output: { message: error instanceof Error ? error.message : 'AI request failed.' } }
   }
 
   const data = await response.json()

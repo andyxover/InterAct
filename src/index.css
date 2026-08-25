@@ -2708,6 +2708,154 @@ h2 {
   margin-left: auto;
 }
 
+.participant-history-section {
+  display: grid;
+  gap: 10px;
+}
+
+.participant-history-heading,
+.participant-history-heading > div,
+.participant-history-answer,
+.participant-history-audio > p,
+.participant-history-quiz > p {
+  align-items: center;
+  display: flex;
+}
+
+.participant-history-heading {
+  justify-content: space-between;
+}
+
+.participant-history-heading > div {
+  gap: 8px;
+}
+
+.participant-history-heading h2 {
+  font-size: 20px;
+  margin: 0;
+}
+
+.participant-history-heading > button {
+  min-height: 38px;
+}
+
+.participant-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.participant-history-item {
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-md);
+  overflow: hidden;
+}
+
+.participant-history-toggle {
+  background: var(--surface);
+  border: 0;
+  border-radius: 0;
+  color: var(--text);
+  display: grid;
+  grid-template-columns: minmax(70px, auto) minmax(0, 1fr) 22px;
+  min-height: 54px;
+  padding: 10px 14px;
+  text-align: left;
+  width: 100%;
+}
+
+.participant-history-toggle:hover {
+  background: var(--track);
+}
+
+.participant-history-toggle span {
+  color: var(--muted);
+  font-size: 13px;
+}
+
+.participant-history-toggle strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.participant-history-body {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 12px;
+  padding: 14px;
+}
+
+.participant-history-body > img {
+  border-radius: var(--radius-sm);
+  max-height: 45svh;
+  object-fit: contain;
+  width: 100%;
+}
+
+.participant-history-answer,
+.participant-history-audio > p,
+.participant-history-quiz > p {
+  gap: 7px;
+  margin: 0;
+}
+
+.participant-history-audio,
+.participant-history-quiz {
+  display: grid;
+  gap: 10px;
+}
+
+.participant-history-audio audio {
+  height: 42px;
+  width: 100%;
+}
+
+.participant-history-audio small,
+.participant-history-quiz small {
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.participant-history-quiz > div {
+  border-top: 1px solid var(--border);
+  display: grid;
+  gap: 4px;
+  padding-top: 10px;
+}
+
+.participant-history-quiz > div p {
+  margin: 0;
+}
+
+@media (max-width: 640px) {
+  .participant-history-heading {
+    align-items: flex-start;
+  }
+
+  .participant-history-heading h2 {
+    font-size: 18px;
+  }
+
+  .participant-history-toggle {
+    grid-template-columns: minmax(0, 1fr) 22px;
+  }
+
+  .participant-history-toggle span {
+    grid-column: 1;
+  }
+
+  .participant-history-toggle strong {
+    grid-column: 1;
+    white-space: normal;
+  }
+
+  .participant-history-toggle svg {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+}
+
 .lottery-overlay {
   align-items: center;
   background: rgb(24 34 58 / 94%);

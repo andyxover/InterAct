@@ -3,6 +3,7 @@ import type { FormEvent } from 'react'
 import { BookOpen, PartyPopper, Send, Sparkles, Waves } from 'lucide-react'
 import { useLocation, useNavigate, useParams } from 'react-router-dom'
 import { ParticipantQuestionView } from '../components/ParticipantQuestionView'
+import { ParticipantQuestionHistory } from '../components/ParticipantQuestionHistory'
 import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
 import type { QuizSubmission } from '../components/ParticipantCustomQuiz'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
@@ -56,6 +57,12 @@ export function ParticipantPage() {
   const [exitTicket, setExitTicket] = useState<ExitTicket | null>(null)
   const [sessionSummary, setSessionSummary] = useState<SessionAnalysis | null>(null)
   const [sharedContents, setSharedContents] = useState<SharedContent[]>([])
+  const [historyQuestions, setHistoryQuestions] = useState<Question[]>([])
+  const [historyAnswers, setHistoryAnswers] = useState<Answer[]>([])
+  const [historyScreenshots, setHistoryScreenshots] = useState<Record<string, Screenshot>>({})
+  const [historyAudioResponses, setHistoryAudioResponses] = useState<Record<string, AudioResponse | null>>({})
+  const [historyQuizData, setHistoryQuizData] = useState<Record<string, ParticipantQuizData | null>>({})
+  const [historyLoadingQuestionIds, setHistoryLoadingQuestionIds] = useState<Set<string>>(new Set())
   const [lotteryEvent, setLotteryEvent] = useState<LotterySessionEvent | null>(null)
   const [buzzerEvent, setBuzzerEvent] = useState<BuzzerSessionEvent | null>(null)
   const [buzzerBusy, setBuzzerBusy] = useState(false)
@@ -81,12 +88,14 @@ export function ParticipantPage() {
     if (!isSupabaseConfigured || !sessionId || !participantId) return
     const requestId = ++loadSequence.current
     const supabase = requireSupabase()
-    const [{ data: sessionData }, { data: participantData }, { data: exitTicketData }, { data: sharedContentData }, { data: buzzerData }] = await Promise.all([
+    const [{ data: sessionData }, { data: participantData }, { data: exitTicketData }, { data: sharedContentData }, { data: buzzerData }, { data: allQuestions }, { data: allAnswers }] = await Promise.all([
       supabase.from('sessions').select('*').eq('id', sessionId).single(),
       supabase.from('participants').select('*').eq('id', participantId).single(),
       supabase.from('exit_tickets').select('*').eq('session_id', sessionId).eq('participant_id', participantId).maybeSingle(),
       supabase.from('shared_contents').select('*').eq('session_id', sessionId).order('created_at', { ascending: false }),
       supabase.from('session_events').select('*').eq('session_id', sessionId).eq('event_type', 'buzzer').order('created_at', { ascending: false }).limit(1).maybeSingle(),
+      supabase.from('questions').select('*').eq('session_id', sessionId).order('created_at'),
+      supabase.from('answers').select('*').eq('session_id', sessionId).eq('participant_id', participantId).order('submitted_at'),
     ])
     if (requestId !== loadSequence.current) return
     const nextSession = sessionData as Session | null
@@ -96,6 +105,20 @@ export function ParticipantPage() {
     setExitTicket((exitTicketData as ExitTicket | null) || null)
     setSharedContents((sharedContentData || []) as SharedContent[])
     setBuzzerEvent((buzzerData as BuzzerSessionEvent | null) || null)
+    const participantAnswers = (allAnswers || []) as Answer[]
+    const answeredQuestionIds = new Set(participantAnswers.map((item) => item.question_id))
+    const answeredQuestions = ((allQuestions || []) as Question[]).filter((item) => answeredQuestionIds.has(item.id))
+    setHistoryAnswers(participantAnswers)
+    setHistoryQuestions(answeredQuestions)
+
+    const screenshotIds = [...new Set(answeredQuestions.map((item) => item.screenshot_id).filter((id): id is string => Boolean(id)))]
+    if (screenshotIds.length) {
+      const { data: historyScreenshotData } = await supabase.from('screenshots').select('*').in('id', screenshotIds)
+      if (requestId !== loadSequence.current) return
+      setHistoryScreenshots(Object.fromEntries(((historyScreenshotData || []) as Screenshot[]).map((item) => [item.id, item])))
+    } else {
+      setHistoryScreenshots({})
+    }
 
     if (nextSession?.status === 'ended') {
       const { data: summaryData } = await supabase
@@ -185,6 +208,33 @@ export function ParticipantPage() {
       setScreenshot(null)
     }
   }, [locale, participantId, participantToken, sessionId])
+
+  const loadHistoryDetails = useCallback(async (historyQuestion: Question) => {
+    if (!participantId || !participantToken || !['custom_quiz', 'pronunciation', 'oral_response'].includes(historyQuestion.type)) return
+    if (historyQuizData[historyQuestion.id] !== undefined || historyAudioResponses[historyQuestion.id] !== undefined) return
+    setHistoryLoadingQuestionIds((current) => new Set(current).add(historyQuestion.id))
+    try {
+      const action = historyQuestion.type === 'custom_quiz' ? 'get_custom_quiz' : 'get_recording_result'
+      const { data, error: detailError } = await requireSupabase().functions.invoke('participant-action', {
+        body: { action, sessionId, participantId, participantToken, questionId: historyQuestion.id },
+      })
+      if (detailError) throw detailError
+      if (historyQuestion.type === 'custom_quiz') {
+        setHistoryQuizData((current) => ({ ...current, [historyQuestion.id]: (data as ParticipantQuizData | null) || null }))
+      } else {
+        setHistoryAudioResponses((current) => ({ ...current, [historyQuestion.id]: (data?.response as AudioResponse | null) || null }))
+      }
+    } catch {
+      if (historyQuestion.type === 'custom_quiz') setHistoryQuizData((current) => ({ ...current, [historyQuestion.id]: null }))
+      else setHistoryAudioResponses((current) => ({ ...current, [historyQuestion.id]: null }))
+    } finally {
+      setHistoryLoadingQuestionIds((current) => {
+        const next = new Set(current)
+        next.delete(historyQuestion.id)
+        return next
+      })
+    }
+  }, [historyAudioResponses, historyQuizData, participantId, participantToken, sessionId])
 
   useEffect(() => {
     if (!participantId) navigate(`/join/${sessionId}${location.search}`)
@@ -499,6 +549,16 @@ export function ParticipantPage() {
             />
           </section>
         )}
+        <ParticipantQuestionHistory
+          answers={historyAnswers}
+          audioResponses={historyAudioResponses}
+          loadingQuestionIds={historyLoadingQuestionIds}
+          locale={locale}
+          questions={historyQuestions}
+          quizData={historyQuizData}
+          screenshots={historyScreenshots}
+          onLoadDetails={loadHistoryDetails}
+        />
       </main>
     )
   }
@@ -558,6 +618,17 @@ export function ParticipantPage() {
         onSubmit={submitAnswer}
         onSubmitAudio={submitAudio}
       />}
+      <ParticipantQuestionHistory
+        activeQuestionId={question?.id}
+        answers={historyAnswers}
+        audioResponses={historyAudioResponses}
+        loadingQuestionIds={historyLoadingQuestionIds}
+        locale={locale}
+        questions={historyQuestions}
+        quizData={historyQuizData}
+        screenshots={historyScreenshots}
+        onLoadDetails={loadHistoryDetails}
+      />
       <form className="panel message-form" onSubmit={sendMessage}>
         <label>
           {participantText(locale, 'sendFeedback')}

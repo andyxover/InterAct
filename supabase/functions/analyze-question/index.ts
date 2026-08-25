@@ -72,7 +72,7 @@ function retryableStatus(status: number) {
 async function requestAnalysis(apiKey: string, models: string[], body: string) {
   let failureMessage = 'Gemini request failed.'
 
-  for (const model of models) {
+  for (const [index, model] of models.entries()) {
     let response: Response
     try {
       response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
@@ -82,7 +82,7 @@ async function requestAnalysis(apiKey: string, models: string[], body: string) {
           'Content-Type': 'application/json',
         },
         body,
-        signal: AbortSignal.timeout(20_000),
+        signal: AbortSignal.timeout(index === 0 ? 12_000 : 18_000),
       })
     } catch (error) {
       failureMessage = error instanceof Error ? error.message : 'Gemini request failed.'

@@ -1,4 +1,4 @@
-import { callAiJson } from './ai.ts'
+import { callAiJson, geminiModels, geminiThinkingConfig } from './ai.ts'
 import { getAdminClient } from './supabase.ts'
 
 type RequestedType = 'random' | 'multiple_choice' | 'fill_blank' | 'short_answer'
@@ -142,8 +142,7 @@ export async function generateCustomQuiz(input: {
   requestedType: RequestedType
 }) {
   const apiKey = Deno.env.get('GEMINI_API_KEY')
-  const model = Deno.env.get('GEMINI_MODEL') || 'gemini-3.6-flash'
-  const fallbackModel = Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.6-flash'
+  const [model, fallbackModel] = geminiModels('realtime')
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
 
   const imageResponse = await fetch(input.screenshotUrl)
@@ -185,15 +184,18 @@ export async function generateCustomQuiz(input: {
     // The current Generate Content API accepts JSON Schema through
     // responseFormat for both Gemini 3.x and Gemini 2.5. responseSchema is a
     // different, restricted schema dialect and rejects JSON Schema keywords.
-    const generationConfig = { responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } } }
+    const generationConfig = {
+      thinkingConfig: geminiThinkingConfig('realtime'),
+      responseFormat: { text: { mimeType: 'APPLICATION_JSON', schema: quizGenerationSchema } },
+    }
     return JSON.stringify({ ...requestPayload, generationConfig })
   }
 
   const body = requestBodyForModel()
-  let result = await requestQuizGeneration(apiKey, model, body, 1, 30_000)
-  if (!result.response && fallbackModel !== model && (result.failureStatus === null || retryableStatus(result.failureStatus))) {
+  let result = await requestQuizGeneration(apiKey, model, body, 1, 12_000)
+  if (!result.response && fallbackModel && fallbackModel !== model && (result.failureStatus === null || retryableStatus(result.failureStatus))) {
     console.warn(`Gemini quiz generation unavailable on ${model}; retrying with ${fallbackModel}.`)
-    result = await requestQuizGeneration(apiKey, fallbackModel, body, 2, 45_000)
+    result = await requestQuizGeneration(apiKey, fallbackModel, body, 1, 18_000)
   }
   if (!result.response) {
     const status = result.failureStatus ? ` (${result.failureStatus})` : ''
@@ -297,6 +299,7 @@ export async function gradeCustomQuizAttempt(attemptId: string) {
         '你是 InterAct 的形成性評量評分助理。依每題配分、參考答案與 rubric 評分。填充題接受語意相同且沒有概念錯誤的答案；簡答題依 rubric 給部分分。每題分數不得小於 0 或超過該題 points。以台灣繁體中文提供簡潔、具體且鼓勵性的回饋，並提供忠實英文翻譯。不得因文法或用字風格與參考答案不同而扣除內容正確答案的分數。',
         { items: aiGradingInput },
         gradingSchema,
+        'realtime',
       )
       if (result.status !== 'success') throw new Error(String((result.output as { message?: string }).message || 'AI grading failed.'))
       output = result.output as typeof output
