@@ -23,6 +23,20 @@ module.exports = {
       to: 'icon.ico',
     },
   ],
+  mac: {
+    // electron-builder generates the .icns from this PNG automatically.
+    icon: 'build/icon.png',
+    category: 'public.app-category.education',
+    // Local unsigned build; skip code signing so packaging works without an
+    // Apple Developer identity in the keychain.
+    identity: null,
+    target: [
+      {
+        target: 'dmg',
+        arch: ['arm64'],
+      },
+    ],
+  },
   win: {
     icon: 'build/icon.ico',
     executableName: 'InterAct',

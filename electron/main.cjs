@@ -43,6 +43,18 @@ const QUIZ_REVIEW_RELATIVE_LEVEL = 5
 
 app.setAppUserModelId(APP_USER_MODEL_ID)
 
+// setAppDetails is a Windows-only API; calling it on macOS/Linux throws.
+function setWindowsAppDetails(window) {
+  if (process.platform !== 'win32') return
+  window.setAppDetails({
+    appId: APP_USER_MODEL_ID,
+    appIconPath: APP_RELAUNCH_ICON_PATH,
+    appIconIndex: 0,
+    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
+    relaunchDisplayName: 'InterAct',
+  })
+}
+
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function requireUuid(value, label = 'session') {
@@ -118,13 +130,7 @@ function createWindow() {
 
   mainWindow.once('ready-to-show', () => mainWindow?.show())
 
-  mainWindow.setAppDetails({
-    appId: APP_USER_MODEL_ID,
-    appIconPath: APP_RELAUNCH_ICON_PATH,
-    appIconIndex: 0,
-    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
-    relaunchDisplayName: 'InterAct',
-  })
+  setWindowsAppDetails(mainWindow)
   configureWebContents(mainWindow)
 
   loadAppRoute(mainWindow, '/presenter/new')
@@ -304,13 +310,7 @@ function createReportWindow(sessionId, generate = false) {
     },
   })
 
-  reportWindow.setAppDetails({
-    appId: APP_USER_MODEL_ID,
-    appIconPath: APP_RELAUNCH_ICON_PATH,
-    appIconIndex: 0,
-    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
-    relaunchDisplayName: 'InterAct',
-  })
+  setWindowsAppDetails(reportWindow)
   configureWebContents(reportWindow)
 
   loadAppRoute(reportWindow, `/session-report/${sessionId}${generate ? '?generate=1' : ''}`)
@@ -363,13 +363,7 @@ function createWordCloudWindow(sessionId) {
     },
   })
 
-  wordCloudWindow.setAppDetails({
-    appId: APP_USER_MODEL_ID,
-    appIconPath: APP_RELAUNCH_ICON_PATH,
-    appIconIndex: 0,
-    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
-    relaunchDisplayName: 'InterAct',
-  })
+  setWindowsAppDetails(wordCloudWindow)
   configureWebContents(wordCloudWindow)
   wordCloudWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, WORD_CLOUD_RELATIVE_LEVEL)
 
@@ -433,13 +427,7 @@ function createCustomQuizReviewWindow(sessionId, questionId) {
     },
   })
   quizReviewWindow = nextQuizReviewWindow
-  nextQuizReviewWindow.setAppDetails({
-    appId: APP_USER_MODEL_ID,
-    appIconPath: APP_RELAUNCH_ICON_PATH,
-    appIconIndex: 0,
-    relaunchCommand: `"${APP_EXECUTABLE_PATH}"`,
-    relaunchDisplayName: 'InterAct',
-  })
+  setWindowsAppDetails(nextQuizReviewWindow)
   configureWebContents(nextQuizReviewWindow)
   nextQuizReviewWindow.setAlwaysOnTop(true, TOPMOST_LEVEL, QUIZ_REVIEW_RELATIVE_LEVEL)
   loadAppRoute(nextQuizReviewWindow, `/custom-quiz-review/${sessionId}/${questionId}`)
