@@ -2,7 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
-import type { CaptionDisplay } from '../components/PresenterControlPanel'
+import type { CaptionDisplay, CaptionSize, CaptionStyle } from '../components/PresenterControlPanel'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
 import { ExitTicketResult } from '../components/ExitTicketResult'
@@ -76,12 +76,30 @@ export function PresenterPage() {
     const stored = localStorage.getItem('interact_caption_display')
     return stored === 'zh' || stored === 'en' ? stored : 'both'
   })
+  const [captionSize, setCaptionSize] = useState<CaptionSize>(() => {
+    const stored = localStorage.getItem('interact_caption_size')
+    return stored === 'sm' || stored === 'lg' ? stored : 'md'
+  })
+  const [captionStyle, setCaptionStyle] = useState<CaptionStyle>(() => {
+    const stored = localStorage.getItem('interact_caption_style')
+    return stored === 'light' || stored === 'plain' ? stored : 'dark'
+  })
 
   function changeCaptionDisplay(display: CaptionDisplay) {
     setCaptionDisplay(display)
     // The overlay window shares this origin and follows the choice through
     // its own localStorage listener.
     localStorage.setItem('interact_caption_display', display)
+  }
+
+  function changeCaptionSize(size: CaptionSize) {
+    setCaptionSize(size)
+    localStorage.setItem('interact_caption_size', size)
+  }
+
+  function changeCaptionStyle(style: CaptionStyle) {
+    setCaptionStyle(style)
+    localStorage.setItem('interact_caption_style', style)
   }
 
   useEffect(() => {
@@ -921,6 +939,10 @@ export function PresenterPage() {
           captionsEnabled={captionsOn}
           captionDisplay={captionDisplay}
           onChangeCaptionDisplay={changeCaptionDisplay}
+          captionSize={captionSize}
+          onChangeCaptionSize={changeCaptionSize}
+          captionStyle={captionStyle}
+          onChangeCaptionStyle={changeCaptionStyle}
           onToggleAnonymous={() => updateSession({ anonymous_enabled: !session.anonymous_enabled })}
           onToggleCaptions={() => setCaptionsOn((current) => !current)}
           onToggleDanmaku={() => updateSession({ danmaku_enabled: !session.danmaku_enabled })}

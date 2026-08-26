@@ -26,3 +26,6 @@ verify_jwt = false
 
 [functions.caption-token]
 verify_jwt = false
+
+[functions.caption-tts]
+verify_jwt = false

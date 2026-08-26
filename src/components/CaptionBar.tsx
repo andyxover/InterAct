@@ -13,10 +13,17 @@ type Props = {
 }
 
 type CaptionDisplay = 'zh' | 'en' | 'both'
+type CaptionAppearance = { display: CaptionDisplay; size: 'sm' | 'md' | 'lg'; style: 'dark' | 'light' | 'plain' }
 
-function storedCaptionDisplay(): CaptionDisplay {
-  const stored = localStorage.getItem('interact_caption_display')
-  return stored === 'zh' || stored === 'en' ? stored : 'both'
+function storedCaptionAppearance(): CaptionAppearance {
+  const display = localStorage.getItem('interact_caption_display')
+  const size = localStorage.getItem('interact_caption_size')
+  const style = localStorage.getItem('interact_caption_style')
+  return {
+    display: display === 'zh' || display === 'en' ? display : 'both',
+    size: size === 'sm' || size === 'lg' ? size : 'md',
+    style: style === 'light' || style === 'plain' ? style : 'dark',
+  }
 }
 
 export function CaptionBar({ sessionId, mode }: Props) {
@@ -24,17 +31,19 @@ export function CaptionBar({ sessionId, mode }: Props) {
   // In-progress speech streamed word-by-word from the presenter, shown until
   // the finalized (and translated) caption row replaces it.
   const [partial, setPartial] = useState('')
-  // Presenter-chosen classroom display language; the presenter panel writes
-  // it to localStorage and this overlay window follows via storage events.
-  const [display, setDisplay] = useState<CaptionDisplay>(storedCaptionDisplay)
+  // Presenter-chosen classroom display language, size, and style; the
+  // presenter panel writes them to localStorage and this overlay window
+  // follows via storage events.
+  const [appearance, setAppearance] = useState<CaptionAppearance>(storedCaptionAppearance)
+  const { display } = appearance
   const hideTimerRef = useRef(0)
   const partialTimerRef = useRef(0)
 
   useEffect(() => {
     if (mode !== 'overlay') return
-    const syncDisplay = () => setDisplay(storedCaptionDisplay())
-    window.addEventListener('storage', syncDisplay)
-    return () => window.removeEventListener('storage', syncDisplay)
+    const syncAppearance = () => setAppearance(storedCaptionAppearance())
+    window.addEventListener('storage', syncAppearance)
+    return () => window.removeEventListener('storage', syncAppearance)
   }, [mode])
 
   useEffect(() => {
@@ -67,12 +76,14 @@ export function CaptionBar({ sessionId, mode }: Props) {
     }
   }, [mode, sessionId])
 
+  const overlayClasses = `caption-bar caption-bar-overlay caption-size-${appearance.size} caption-style-${appearance.style}`
+
   // In English-only classroom display, live partials (which arrive in the
   // spoken language) are hidden; sentences appear once translated.
   const partialsVisible = mode !== 'overlay' || display !== 'en'
   if (partial && partialsVisible) {
     return (
-      <div aria-live="polite" className={`caption-bar caption-bar-${mode === 'overlay' ? 'overlay' : 'participant'}`}>
+      <div aria-live="polite" className={mode === 'overlay' ? overlayClasses : 'caption-bar caption-bar-participant'}>
         <p className="caption-primary caption-live">{partial}</p>
       </div>
     )
@@ -89,7 +100,7 @@ export function CaptionBar({ sessionId, mode }: Props) {
     if (!primary) return null
     const secondary = display === 'both' && english && english !== primary ? english : null
     return (
-      <div aria-live="polite" className="caption-bar caption-bar-overlay">
+      <div aria-live="polite" className={overlayClasses}>
         <p className="caption-primary">{primary}</p>
         {secondary && <p className="caption-secondary">{secondary}</p>}
       </div>
