@@ -7,6 +7,7 @@ import { ParticipantQuestionHistory } from '../components/ParticipantQuestionHis
 import { ParticipantCustomQuiz } from '../components/ParticipantCustomQuiz'
 import type { QuizSubmission } from '../components/ParticipantCustomQuiz'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
+import { CaptionBar } from '../components/CaptionBar'
 import { ExitTicketForm } from '../components/ExitTicketForm'
 import { LotteryOverlay } from '../components/LotteryOverlay'
 import { SharedContentPanel } from '../components/SharedContentPanel'
@@ -656,6 +657,7 @@ export function ParticipantPage() {
         participantId={participant?.id}
         onBuzz={claimBuzzer}
       />
+      <CaptionBar mode={locale} sessionId={sessionId} />
     </main>
   )
 }

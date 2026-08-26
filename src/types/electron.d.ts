@@ -32,6 +32,7 @@ declare global {
       listCaptureSources: () => Promise<InterActCaptureSource[]>
       startCaptureSelection: () => Promise<InterActCaptureSource>
       finishCaptureSelection: (expanded?: boolean) => Promise<void>
+      requestMicrophoneAccess?: () => Promise<boolean>
     }
   }
 }

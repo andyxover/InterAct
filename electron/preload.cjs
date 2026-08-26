@@ -20,6 +20,7 @@ contextBridge.exposeInMainWorld('interactDesktop', {
   minimize: () => ipcRenderer.invoke('window:minimize'),
   close: () => ipcRenderer.invoke('window:close'),
   listCaptureSources: () => ipcRenderer.invoke('capture:list'),
+  requestMicrophoneAccess: () => ipcRenderer.invoke('captions:request-mic'),
   startCaptureSelection: () => ipcRenderer.invoke('capture:start-selection'),
   finishCaptureSelection: (expanded) => ipcRenderer.invoke('capture:finish-selection', expanded),
 })

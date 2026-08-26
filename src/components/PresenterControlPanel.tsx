@@ -1,4 +1,4 @@
-import { BellRing, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
+import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
 import type { Session } from '../types'
 
 type Props = {
@@ -6,8 +6,10 @@ type Props = {
   onlineCount: number
   busy: boolean
   buzzerActive: boolean
+  captionsEnabled: boolean
   onToggleDanmaku: () => void
   onToggleAnonymous: () => void
+  onToggleCaptions: () => void
   onCaptureScreen?: () => void
   onDrawLottery: () => void
   onStartBuzzer: () => void
@@ -23,8 +25,10 @@ export function PresenterControlPanel({
   onlineCount,
   busy,
   buzzerActive,
+  captionsEnabled,
   onToggleDanmaku,
   onToggleAnonymous,
+  onToggleCaptions,
   onCaptureScreen,
   onDrawLottery,
   onStartBuzzer,
@@ -89,6 +93,18 @@ export function PresenterControlPanel({
             <MessageSquare size={16} />
             <span>匿名</span>
             <b>{session.anonymous_enabled ? '開啟' : '關閉'}</b>
+          </button>
+          <button
+            aria-pressed={captionsEnabled}
+            className={`control-toggle${captionsEnabled ? ' is-active' : ''}`}
+            title="錄下講者聲音，AI 即時產生中英字幕給學員"
+            type="button"
+            onClick={onToggleCaptions}
+            disabled={busy}
+          >
+            {captionsEnabled ? <Captions size={16} /> : <CaptionsOff size={16} />}
+            <span>字幕</span>
+            <b>{captionsEnabled ? '開啟' : '關閉'}</b>
           </button>
         </div>
       </div>

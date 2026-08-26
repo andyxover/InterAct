@@ -1,4 +1,4 @@
-const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell } = require('electron')
+const { app, BrowserWindow, desktopCapturer, ipcMain, screen, shell, systemPreferences } = require('electron')
 const path = require('node:path')
 const fs = require('node:fs')
 
@@ -587,6 +587,12 @@ ipcMain.handle('window:open-custom-quiz-review', (_event, sessionId, questionId)
 })
 
 ipcMain.handle('capture:list', listCaptureSources)
+
+ipcMain.handle('captions:request-mic', async () => {
+  if (process.platform !== 'darwin') return true
+  if (systemPreferences.getMediaAccessStatus('microphone') === 'granted') return true
+  return systemPreferences.askForMediaAccess('microphone')
+})
 
 ipcMain.handle('capture:start-selection', async () => {
   if (!mainWindow || mainWindow.isDestroyed()) throw new Error('InterAct presenter window is unavailable.')

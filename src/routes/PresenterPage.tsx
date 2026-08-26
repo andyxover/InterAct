@@ -14,6 +14,7 @@ import { CustomQuizResult } from '../components/CustomQuizResult'
 import { SetupNotice } from '../components/SetupNotice'
 import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
+import { startCaptionRecorder } from '../lib/liveCaptions'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -69,6 +70,43 @@ export function PresenterPage() {
   const selectionStartRef = useRef<{ x: number; y: number } | null>(null)
   const selectionRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
+  const [captionsOn, setCaptionsOn] = useState(false)
+
+  useEffect(() => {
+    if (!captionsOn) return
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) {
+      setAnalysisError('這個舊場次沒有講者權限，無法開啟即時字幕。')
+      setCaptionsOn(false)
+      return
+    }
+
+    let cancelled = false
+    let stopRecorder: (() => void) | null = null
+    const begin = async () => {
+      try {
+        const granted = await window.interactDesktop?.requestMicrophoneAccess?.() ?? true
+        if (!granted) throw new Error('請在系統設定允許 InterAct 使用麥克風後再開啟字幕。')
+        if (cancelled) return
+        stopRecorder = await startCaptionRecorder({
+          sessionId,
+          presenterToken,
+          onError: (message) => setAnalysisError(`即時字幕：${message}`),
+        })
+        if (cancelled) stopRecorder()
+      } catch (error) {
+        setAnalysisError(error instanceof Error ? error.message : '無法開啟即時字幕。')
+        setCaptionsOn(false)
+      }
+    }
+    void begin()
+
+    return () => {
+      cancelled = true
+      stopRecorder?.()
+    }
+  }, [captionsOn, sessionId])
+
   const fallbackJoinUrl = useMemo(
     () => buildJoinUrl(session?.code || sessionId),
     [session?.code, sessionId],
@@ -868,7 +906,9 @@ export function PresenterPage() {
           onDrawLottery={drawLottery}
           onStartBuzzer={startBuzzer}
           onStopQuestion={stopQuestion}
+          captionsEnabled={captionsOn}
           onToggleAnonymous={() => updateSession({ anonymous_enabled: !session.anonymous_enabled })}
+          onToggleCaptions={() => setCaptionsOn((current) => !current)}
           onToggleDanmaku={() => updateSession({ danmaku_enabled: !session.danmaku_enabled })}
           onCaptureScreen={window.interactDesktop ? captureWindowsScreen : undefined}
           onGenerateExitTicket={generateExitTicket}

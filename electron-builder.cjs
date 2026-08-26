@@ -30,6 +30,9 @@ module.exports = {
     // Local unsigned build; skip code signing so packaging works without an
     // Apple Developer identity in the keychain.
     identity: null,
+    extendInfo: {
+      NSMicrophoneUsageDescription: 'InterAct 需要使用麥克風，才能產生課堂即時字幕。',
+    },
     target: [
       {
         target: 'dmg',

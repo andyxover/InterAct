@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams } from 'react-router-dom'
+import { CaptionBar } from '../components/CaptionBar'
 import { DanmakuLayer } from '../components/DanmakuLayer'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { LotteryOverlay } from '../components/LotteryOverlay'
@@ -170,6 +171,7 @@ export function DesktopOverlayPage() {
   return (
     <div className="desktop-overlay-root">
       <DanmakuLayer messages={messages} session={session} />
+      <CaptionBar mode="overlay" sessionId={sessionId} />
       <LotteryOverlay event={lotteryEvent} onSelect={selectLotteryCandidate} />
       <BuzzerOverlay event={buzzerEvent} onStart={activateBuzzer} />
     </div>

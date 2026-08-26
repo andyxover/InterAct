@@ -35,6 +35,16 @@ export type Message = {
   created_at: string
 }
 
+export type Caption = {
+  id: string
+  session_id: string
+  original: string
+  original_lang: string | null
+  text_zh: string | null
+  text_en: string | null
+  created_at: string
+}
+
 export type Screenshot = {
   id: string
   session_id: string

@@ -20,3 +20,6 @@ verify_jwt = false
 
 [functions.shorten-url]
 verify_jwt = false
+
+[functions.live-caption]
+verify_jwt = false
