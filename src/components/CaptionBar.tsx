@@ -12,13 +12,30 @@ type Props = {
   mode: 'zh-TW' | 'en' | 'overlay'
 }
 
+type CaptionDisplay = 'zh' | 'en' | 'both'
+
+function storedCaptionDisplay(): CaptionDisplay {
+  const stored = localStorage.getItem('interact_caption_display')
+  return stored === 'zh' || stored === 'en' ? stored : 'both'
+}
+
 export function CaptionBar({ sessionId, mode }: Props) {
   const [caption, setCaption] = useState<Caption | null>(null)
   // In-progress speech streamed word-by-word from the presenter, shown until
   // the finalized (and translated) caption row replaces it.
   const [partial, setPartial] = useState('')
+  // Presenter-chosen classroom display language; the presenter panel writes
+  // it to localStorage and this overlay window follows via storage events.
+  const [display, setDisplay] = useState<CaptionDisplay>(storedCaptionDisplay)
   const hideTimerRef = useRef(0)
   const partialTimerRef = useRef(0)
+
+  useEffect(() => {
+    if (mode !== 'overlay') return
+    const syncDisplay = () => setDisplay(storedCaptionDisplay())
+    window.addEventListener('storage', syncDisplay)
+    return () => window.removeEventListener('storage', syncDisplay)
+  }, [mode])
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId) return
@@ -50,7 +67,10 @@ export function CaptionBar({ sessionId, mode }: Props) {
     }
   }, [mode, sessionId])
 
-  if (partial) {
+  // In English-only classroom display, live partials (which arrive in the
+  // spoken language) are hidden; sentences appear once translated.
+  const partialsVisible = mode !== 'overlay' || display !== 'en'
+  if (partial && partialsVisible) {
     return (
       <div aria-live="polite" className={`caption-bar caption-bar-${mode === 'overlay' ? 'overlay' : 'participant'}`}>
         <p className="caption-primary caption-live">{partial}</p>
@@ -63,8 +83,11 @@ export function CaptionBar({ sessionId, mode }: Props) {
   if (mode === 'overlay') {
     // Transcription may come back in simplified characters; prefer the
     // Traditional Chinese rendering on the classroom screen.
-    const primary = (caption.original_lang === 'zh' && caption.text_zh) || caption.original
-    const secondary = caption.text_en && caption.text_en !== primary ? caption.text_en : null
+    const chinese = (caption.original_lang === 'zh' && caption.text_zh) || caption.text_zh || caption.original
+    const english = caption.text_en || (caption.original_lang === 'en' ? caption.original : null)
+    const primary = display === 'en' ? english : chinese
+    if (!primary) return null
+    const secondary = display === 'both' && english && english !== primary ? english : null
     return (
       <div aria-live="polite" className="caption-bar caption-bar-overlay">
         <p className="caption-primary">{primary}</p>

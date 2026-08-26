@@ -1,12 +1,22 @@
 import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
 import type { Session } from '../types'
 
+export type CaptionDisplay = 'zh' | 'en' | 'both'
+
+const CAPTION_DISPLAY_OPTIONS: Array<{ value: CaptionDisplay; label: string }> = [
+  { value: 'zh', label: '中' },
+  { value: 'en', label: '英' },
+  { value: 'both', label: '中英' },
+]
+
 type Props = {
   session: Session
   onlineCount: number
   busy: boolean
   buzzerActive: boolean
   captionsEnabled: boolean
+  captionDisplay: CaptionDisplay
+  onChangeCaptionDisplay: (display: CaptionDisplay) => void
   onToggleDanmaku: () => void
   onToggleAnonymous: () => void
   onToggleCaptions: () => void
@@ -26,6 +36,8 @@ export function PresenterControlPanel({
   busy,
   buzzerActive,
   captionsEnabled,
+  captionDisplay,
+  onChangeCaptionDisplay,
   onToggleDanmaku,
   onToggleAnonymous,
   onToggleCaptions,
@@ -107,6 +119,23 @@ export function PresenterControlPanel({
             <b>{captionsEnabled ? '開啟' : '關閉'}</b>
           </button>
         </div>
+        {captionsEnabled && (
+          <div className="caption-display-row" role="radiogroup" aria-label="字幕顯示語言">
+            <span className="caption-display-label">字幕語言</span>
+            {CAPTION_DISPLAY_OPTIONS.map((option) => (
+              <button
+                key={option.value}
+                aria-checked={captionDisplay === option.value}
+                className={`caption-display-option${captionDisplay === option.value ? ' is-active' : ''}`}
+                role="radio"
+                type="button"
+                onClick={() => onChangeCaptionDisplay(option.value)}
+              >
+                {option.label}
+              </button>
+            ))}
+          </div>
+        )}
       </div>
 
       <div className="control-section">

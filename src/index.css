@@ -3583,3 +3583,32 @@ h2 {
 .caption-bar .caption-live {
   opacity: 0.92;
 }
+
+.caption-display-row {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: 8px;
+}
+
+.caption-display-label {
+  font-size: 12px;
+  color: var(--text-muted, #6b7280);
+  margin-right: 2px;
+}
+
+.caption-display-option {
+  padding: 4px 10px;
+  border: 1px solid rgba(99, 102, 241, 0.35);
+  border-radius: 999px;
+  background: transparent;
+  font-size: 12px;
+  cursor: pointer;
+}
+
+.caption-display-option.is-active {
+  background: #5b5bd6;
+  border-color: #5b5bd6;
+  color: #fff;
+  font-weight: 600;
+}

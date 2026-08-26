@@ -2,6 +2,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
+import type { CaptionDisplay } from '../components/PresenterControlPanel'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
 import { ExitTicketResult } from '../components/ExitTicketResult'
@@ -71,6 +72,17 @@ export function PresenterPage() {
   const selectionRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [captionsOn, setCaptionsOn] = useState(false)
+  const [captionDisplay, setCaptionDisplay] = useState<CaptionDisplay>(() => {
+    const stored = localStorage.getItem('interact_caption_display')
+    return stored === 'zh' || stored === 'en' ? stored : 'both'
+  })
+
+  function changeCaptionDisplay(display: CaptionDisplay) {
+    setCaptionDisplay(display)
+    // The overlay window shares this origin and follows the choice through
+    // its own localStorage listener.
+    localStorage.setItem('interact_caption_display', display)
+  }
 
   useEffect(() => {
     if (!captionsOn) return
@@ -907,6 +919,8 @@ export function PresenterPage() {
           onStartBuzzer={startBuzzer}
           onStopQuestion={stopQuestion}
           captionsEnabled={captionsOn}
+          captionDisplay={captionDisplay}
+          onChangeCaptionDisplay={changeCaptionDisplay}
           onToggleAnonymous={() => updateSession({ anonymous_enabled: !session.anonymous_enabled })}
           onToggleCaptions={() => setCaptionsOn((current) => !current)}
           onToggleDanmaku={() => updateSession({ danmaku_enabled: !session.danmaku_enabled })}
