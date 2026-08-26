@@ -365,6 +365,7 @@ export type ExitTicket = {
 export type SessionReportData = {
   session: Session
   participants: Participant[]
+  captions: Caption[]
   messages: Message[]
   sharedContents: SharedContent[]
   screenshots: Screenshot[]

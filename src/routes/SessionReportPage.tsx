@@ -3,7 +3,7 @@ import { ArrowLeft, BookOpen, ChartNoAxesCombined, Clock, Download, ListChecks, 
 import { getPresenterToken } from '../lib/presenterAuth'
 import { useSessionReportBack } from '../lib/sessionReportNavigation'
 import { requireSupabase } from '../lib/supabase'
-import type { AiSummary, Answer, AudioResponse, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionCustomQuizResults, SessionMetrics, SessionReportData, SharedContent } from '../types'
+import type { AiSummary, Answer, AudioResponse, Caption, ExitTicket, Message, Participant, Question, Screenshot, Session, SessionAnalysis, SessionCustomQuizResults, SessionMetrics, SessionReportData, SharedContent } from '../types'
 import { useParams, useSearchParams } from 'react-router-dom'
 
 const PAGE_SIZE = 1000
@@ -76,8 +76,9 @@ export function SessionReportPage() {
     const { data: session, error: sessionError } = await supabase.from('sessions').select('*').eq('id', sessionId).single()
     if (sessionError) throw sessionError
 
-    const [participants, messages, sharedContents, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
+    const [participants, captions, messages, sharedContents, screenshots, questions, answers, aiSummaries, exitTickets] = await Promise.all([
       fetchAllRows<Participant>('participants', sessionId, 'joined_at'),
+      fetchAllRows<Caption>('captions', sessionId, 'created_at'),
       fetchAllRows<Message>('messages', sessionId, 'created_at'),
       fetchAllRows<SharedContent>('shared_contents', sessionId, 'created_at'),
       fetchAllRows<Screenshot>('screenshots', sessionId, 'created_at'),
@@ -103,6 +104,7 @@ export function SessionReportPage() {
     setReportData({
       session: session as Session,
       participants,
+      captions,
       messages,
       sharedContents,
       screenshots,

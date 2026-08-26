@@ -391,6 +391,22 @@ export async function exportSessionReport(data: SessionReportData, analysis: Ses
   audioResponses.getColumn('submittedAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
   styleTableSheet(audioResponses)
 
+  const transcript = workbook.addWorksheet('上課逐字稿')
+  transcript.columns = [
+    { header: '時間', key: 'createdAt', width: 22 },
+    { header: '中文', key: 'chinese', width: 70 },
+    { header: 'English', key: 'english', width: 70 },
+  ]
+  for (const caption of data.captions) {
+    transcript.addRow({
+      createdAt: formatDate(caption.created_at),
+      chinese: caption.text_zh || caption.original,
+      english: caption.text_en || (caption.original_lang === 'en' ? caption.original : ''),
+    })
+  }
+  transcript.getColumn('createdAt').numFmt = 'yyyy-mm-dd hh:mm:ss'
+  styleTableSheet(transcript)
+
   const messages = workbook.addWorksheet('彈幕')
   messages.columns = [
     { header: '時間', key: 'createdAt', width: 22 },
