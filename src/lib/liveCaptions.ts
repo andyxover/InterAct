@@ -1,11 +1,9 @@
-import { recordingToWav } from './audio'
+import * as OpenCC from 'opencc-js'
 import { requireSupabase } from './supabase'
 
-const SEGMENT_MS = 5000
-const MIN_SEGMENT_MS = 900
-// 16-bit PCM RMS below this is treated as silence and never uploaded.
-const SILENCE_RMS_THRESHOLD = 250
-const MAX_IN_FLIGHT = 2
+const TARGET_SAMPLE_RATE = 24000
+const PARTIAL_BROADCAST_MS = 250
+const MAX_RECONNECT_ATTEMPTS = 5
 
 type CaptionRecorderOptions = {
   sessionId: string
@@ -13,95 +11,172 @@ type CaptionRecorderOptions = {
   onError: (message: string) => void
 }
 
-function wavRms(wav: ArrayBuffer) {
-  const samples = new Int16Array(wav, 44)
-  if (!samples.length) return 0
-  let total = 0
-  for (let index = 0; index < samples.length; index += 1) total += samples[index] * samples[index]
-  return Math.sqrt(total / samples.length)
-}
+const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' })
 
-function blobToBase64(blob: Blob) {
-  return new Promise<string>((resolve, reject) => {
-    const reader = new FileReader()
-    reader.onerror = () => reject(new Error('無法讀取音訊片段。'))
-    reader.onload = () => {
-      const result = String(reader.result || '')
-      resolve(result.slice(result.indexOf(',') + 1))
-    }
-    reader.readAsDataURL(blob)
-  })
-}
-
-export async function startCaptionRecorder({ sessionId, presenterToken, onError }: CaptionRecorderOptions) {
-  if (!navigator.mediaDevices?.getUserMedia || typeof MediaRecorder === 'undefined') {
-    throw new Error('此環境不支援錄音，無法開啟即時字幕。')
+function downsampleTo24k(samples: Float32Array, sourceRate: number) {
+  if (sourceRate === TARGET_SAMPLE_RATE) return samples
+  const ratio = sourceRate / TARGET_SAMPLE_RATE
+  const result = new Float32Array(Math.max(1, Math.floor(samples.length / ratio)))
+  for (let index = 0; index < result.length; index += 1) {
+    const start = Math.floor(index * ratio)
+    const end = Math.min(samples.length, Math.floor((index + 1) * ratio))
+    let total = 0
+    for (let sourceIndex = start; sourceIndex < end; sourceIndex += 1) total += samples[sourceIndex]
+    result[index] = total / Math.max(1, end - start)
   }
+  return result
+}
 
+function floatToPcm16Base64(samples: Float32Array) {
+  const pcm = new Uint8Array(samples.length * 2)
+  const view = new DataView(pcm.buffer)
+  for (let index = 0; index < samples.length; index += 1) {
+    const clamped = Math.max(-1, Math.min(1, samples[index]))
+    view.setInt16(index * 2, clamped < 0 ? clamped * 0x8000 : clamped * 0x7fff, true)
+  }
+  let binary = ''
+  const chunkSize = 0x8000
+  for (let index = 0; index < pcm.length; index += chunkSize) {
+    binary += String.fromCharCode(...pcm.subarray(index, index + chunkSize))
+  }
+  return btoa(binary)
+}
+
+async function mintStreamToken(sessionId: string, presenterToken: string) {
+  const { data, error } = await requireSupabase().functions.invoke('caption-token', {
+    body: { sessionId, presenterToken },
+  })
+  if (error) throw new Error('無法建立字幕連線，請稍後再試。')
+  if (typeof data?.token !== 'string' || !data.token) throw new Error(data?.message || '無法建立字幕連線。')
+  return data.token as string
+}
+
+// Streams microphone audio to OpenAI Realtime transcription with a
+// server-minted ephemeral token. Word-level partials go to viewers over a
+// Supabase broadcast channel; each VAD-finalized sentence is stored (and
+// translated) through the live-caption edge function.
+export async function startCaptionRecorder({ sessionId, presenterToken, onError }: CaptionRecorderOptions) {
+  if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟即時字幕。')
+
+  const supabase = requireSupabase()
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true },
   })
-  const preferred = ['audio/webm;codecs=opus', 'audio/mp4', 'audio/webm'].find((type) => MediaRecorder.isTypeSupported(type))
+
+  const broadcast = supabase.channel(`caption-live:${sessionId}`)
+  broadcast.subscribe()
+  let lastPartialSentAt = 0
+  let partialText = ''
+  const sendPartial = (text: string, force = false) => {
+    const now = Date.now()
+    if (!force && now - lastPartialSentAt < PARTIAL_BROADCAST_MS) return
+    lastPartialSentAt = now
+    void broadcast.send({ type: 'broadcast', event: 'partial', payload: { text } })
+  }
 
   let stopped = false
-  let recorder: MediaRecorder | null = null
-  let segmentTimer = 0
-  let inFlight = 0
+  let socket: WebSocket | null = null
+  let reconnectAttempts = 0
   let reportedError = false
-
   const reportError = (message: string) => {
     if (reportedError) return
     reportedError = true
     onError(message)
   }
 
-  const sendSegment = async (blob: Blob, durationMs: number) => {
-    if (durationMs < MIN_SEGMENT_MS || inFlight >= MAX_IN_FLIGHT) return
-    inFlight += 1
-    try {
-      const wav = await recordingToWav(blob)
-      const wavBuffer = await wav.arrayBuffer()
-      if (wavRms(wavBuffer) < SILENCE_RMS_THRESHOLD) return
-
-      const { data, error } = await requireSupabase().functions.invoke('live-caption', {
-        body: { sessionId, presenterToken, audioBase64: await blobToBase64(wav) },
+  const finalizeSentence = (transcript: string) => {
+    partialText = ''
+    sendPartial('', true)
+    const text = transcript.trim()
+    if (!text) return
+    void supabase.functions
+      .invoke('live-caption', { body: { sessionId, presenterToken, transcript: text } })
+      .then(({ data, error }) => {
+        if (error) throw error
+        if (data?.message) throw new Error(data.message)
+        reportedError = false
       })
-      if (error) throw error
-      if (data?.message) throw new Error(data.message)
-      reportedError = false
-    } catch (caught) {
-      reportError(caught instanceof Error ? caught.message : '字幕片段處理失敗。')
-    } finally {
-      inFlight -= 1
-    }
+      .catch((caught: unknown) => {
+        reportError(caught instanceof Error ? caught.message : '字幕儲存失敗。')
+      })
   }
 
-  const recordSegment = () => {
+  const connect = async () => {
     if (stopped) return
-    const chunks: Blob[] = []
-    const startedAt = Date.now()
-    const nextRecorder = new MediaRecorder(stream, preferred ? { mimeType: preferred } : undefined)
-    recorder = nextRecorder
-    nextRecorder.ondataavailable = (event) => {
-      if (event.data.size) chunks.push(event.data)
+    const token = await mintStreamToken(sessionId, presenterToken)
+    if (stopped) return
+
+    const nextSocket = new WebSocket('wss://api.openai.com/v1/realtime', [
+      'realtime',
+      `openai-insecure-api-key.${token}`,
+    ])
+    socket = nextSocket
+
+    nextSocket.onopen = () => {
+      reconnectAttempts = 0
     }
-    nextRecorder.onerror = () => reportError('錄音失敗，請確認麥克風權限後重試。')
-    nextRecorder.onstop = () => {
-      if (chunks.length) void sendSegment(new Blob(chunks, { type: nextRecorder.mimeType }), Date.now() - startedAt)
-      recordSegment()
+    nextSocket.onmessage = (event) => {
+      try {
+        const data = JSON.parse(String(event.data))
+        if (data.type === 'conversation.item.input_audio_transcription.delta' && typeof data.delta === 'string') {
+          partialText += data.delta
+          sendPartial(toTraditional(partialText))
+        } else if (data.type === 'conversation.item.input_audio_transcription.completed' && typeof data.transcript === 'string') {
+          finalizeSentence(data.transcript)
+        } else if (data.type === 'error') {
+          reportError(String(data.error?.message || '字幕串流發生錯誤。'))
+        }
+      } catch {
+        // Ignore malformed events; the next one resynchronizes state.
+      }
     }
-    nextRecorder.start()
-    segmentTimer = window.setTimeout(() => {
-      if (nextRecorder.state === 'recording') nextRecorder.stop()
-    }, SEGMENT_MS)
+    nextSocket.onclose = () => {
+      if (stopped || socket !== nextSocket) return
+      reconnectAttempts += 1
+      if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
+        reportError('字幕連線中斷，請關閉字幕後再重新開啟。')
+        return
+      }
+      window.setTimeout(() => {
+        connect().catch((caught: unknown) => {
+          reportError(caught instanceof Error ? caught.message : '字幕連線中斷。')
+        })
+      }, Math.min(8000, 500 * 2 ** reconnectAttempts))
+    }
   }
 
-  recordSegment()
+  const audioContext = new AudioContext()
+  const source = audioContext.createMediaStreamSource(stream)
+  // ScriptProcessorNode is deprecated but works everywhere without a worker,
+  // which the app's CSP (script-src 'self') would block as a blob module.
+  const processor = audioContext.createScriptProcessor(4096, 1, 1)
+  processor.onaudioprocess = (event) => {
+    if (stopped || socket?.readyState !== WebSocket.OPEN) return
+    const samples = downsampleTo24k(event.inputBuffer.getChannelData(0), audioContext.sampleRate)
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: floatToPcm16Base64(samples) }))
+  }
+  source.connect(processor)
+  processor.connect(audioContext.destination)
+
+  try {
+    await connect()
+  } catch (caught) {
+    processor.disconnect()
+    source.disconnect()
+    void audioContext.close()
+    stream.getTracks().forEach((track) => track.stop())
+    supabase.removeChannel(broadcast)
+    throw caught
+  }
 
   return () => {
     stopped = true
-    window.clearTimeout(segmentTimer)
-    if (recorder?.state === 'recording') recorder.stop()
+    socket?.close()
+    processor.disconnect()
+    source.disconnect()
+    void audioContext.close()
     stream.getTracks().forEach((track) => track.stop())
+    sendPartial('', true)
+    supabase.removeChannel(broadcast)
   }
 }

@@ -3,6 +3,7 @@ import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import type { Caption } from '../types'
 
 const CAPTION_VISIBLE_MS = 12_000
+const PARTIAL_STALE_MS = 8_000
 
 type Props = {
   sessionId: string
@@ -13,7 +14,11 @@ type Props = {
 
 export function CaptionBar({ sessionId, mode }: Props) {
   const [caption, setCaption] = useState<Caption | null>(null)
+  // In-progress speech streamed word-by-word from the presenter, shown until
+  // the finalized (and translated) caption row replaces it.
+  const [partial, setPartial] = useState('')
   const hideTimerRef = useRef(0)
+  const partialTimerRef = useRef(0)
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId) return
@@ -27,11 +32,31 @@ export function CaptionBar({ sessionId, mode }: Props) {
       })
       .subscribe()
 
+    const liveChannel = supabase
+      .channel(`caption-live:${sessionId}`)
+      .on('broadcast', { event: 'partial' }, (message) => {
+        const text = typeof message.payload?.text === 'string' ? message.payload.text : ''
+        setPartial(text)
+        window.clearTimeout(partialTimerRef.current)
+        if (text) partialTimerRef.current = window.setTimeout(() => setPartial(''), PARTIAL_STALE_MS)
+      })
+      .subscribe()
+
     return () => {
       window.clearTimeout(hideTimerRef.current)
+      window.clearTimeout(partialTimerRef.current)
       supabase.removeChannel(channel)
+      supabase.removeChannel(liveChannel)
     }
   }, [mode, sessionId])
+
+  if (partial) {
+    return (
+      <div aria-live="polite" className={`caption-bar caption-bar-${mode === 'overlay' ? 'overlay' : 'participant'}`}>
+        <p className="caption-primary caption-live">{partial}</p>
+      </div>
+    )
+  }
 
   if (!caption) return null
 
