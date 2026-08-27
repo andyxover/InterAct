@@ -5,11 +5,24 @@ function transcribeModel() {
   return Deno.env.get('OPENAI_TRANSCRIBE_MODEL') || 'gpt-4o-mini-transcribe'
 }
 
+function turnDetection() {
+  // Semantic VAD segments on sentence meaning instead of pure silence, which
+  // produces better-shaped captions from continuous speakers. Overridable in
+  // case the account or model rejects it.
+  const type = Deno.env.get('OPENAI_TURN_DETECTION') || 'semantic_vad'
+  return type === 'server_vad'
+    ? { type: 'server_vad', silence_duration_ms: 600 }
+    : { type: 'semantic_vad', eagerness: 'medium' }
+}
+
 // Mints a short-lived OpenAI Realtime transcription token so the presenter
 // app can stream microphone audio directly to OpenAI without ever holding the
 // real API key. Tries the GA client_secrets endpoint first, then the beta
 // transcription_sessions endpoint.
-async function mintEphemeralToken(apiKey: string) {
+async function mintEphemeralToken(apiKey: string, vocabulary: string) {
+  const transcription: Record<string, string> = { model: transcribeModel() }
+  if (vocabulary) transcription.prompt = vocabulary
+
   const gaResponse = await fetch('https://api.openai.com/v1/realtime/client_secrets', {
     method: 'POST',
     headers: {
@@ -22,8 +35,8 @@ async function mintEphemeralToken(apiKey: string) {
         audio: {
           input: {
             format: { type: 'audio/pcm', rate: 24000 },
-            transcription: { model: transcribeModel() },
-            turn_detection: { type: 'server_vad', silence_duration_ms: 600 },
+            transcription,
+            turn_detection: turnDetection(),
           },
         },
       },
@@ -48,7 +61,7 @@ async function mintEphemeralToken(apiKey: string) {
     },
     body: JSON.stringify({
       input_audio_format: 'pcm16',
-      input_audio_transcription: { model: transcribeModel() },
+      input_audio_transcription: transcription,
       turn_detection: { type: 'server_vad', silence_duration_ms: 600 },
     }),
     signal: AbortSignal.timeout(15_000),
@@ -89,7 +102,10 @@ Deno.serve(async (req) => {
     const { data: session } = await supabase.from('sessions').select('id, status').eq('id', sessionId).single()
     if (!session || session.status !== 'active') return jsonResponse({ message: '場次已結束，無法產生字幕。' }, 409)
 
-    const ephemeral = await mintEphemeralToken(apiKey)
+    // Course-specific terms the teacher supplied; passed to the transcription
+    // model as a bias prompt. Untrusted text, so cap the length hard.
+    const vocabulary = typeof input.vocabulary === 'string' ? input.vocabulary.trim().slice(0, 600) : ''
+    const ephemeral = await mintEphemeralToken(apiKey, vocabulary)
     return jsonResponse(ephemeral)
   } catch (error) {
     console.error('caption-token failed', error instanceof Error ? error.message : error)

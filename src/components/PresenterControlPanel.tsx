@@ -35,6 +35,8 @@ type Props = {
   onChangeCaptionSize: (size: CaptionSize) => void
   captionStyle: CaptionStyle
   onChangeCaptionStyle: (style: CaptionStyle) => void
+  captionVocabulary: string
+  onChangeCaptionVocabulary: (vocabulary: string) => void
   onToggleDanmaku: () => void
   onToggleAnonymous: () => void
   onToggleCaptions: () => void
@@ -60,6 +62,8 @@ export function PresenterControlPanel({
   onChangeCaptionSize,
   captionStyle,
   onChangeCaptionStyle,
+  captionVocabulary,
+  onChangeCaptionVocabulary,
   onToggleDanmaku,
   onToggleAnonymous,
   onToggleCaptions,
@@ -188,6 +192,17 @@ export function PresenterControlPanel({
                 </button>
               ))}
             </div>
+            <label className="caption-vocab-row">
+              <span className="caption-display-label">課程關鍵詞</span>
+              <input
+                className="caption-vocab-input"
+                maxLength={600}
+                placeholder="今日專有名詞，逗號分隔；下次開啟字幕時生效"
+                type="text"
+                value={captionVocabulary}
+                onChange={(event) => onChangeCaptionVocabulary(event.target.value)}
+              />
+            </label>
           </>
         )}
       </div>

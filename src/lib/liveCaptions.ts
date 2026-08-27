@@ -3,13 +3,18 @@ import { requireSupabase } from './supabase'
 
 const TARGET_SAMPLE_RATE = 24000
 const PARTIAL_BROADCAST_MS = 250
+const PARTIAL_TRANSLATE_MS = 2200
+const PARTIAL_TRANSLATE_MIN_CHARS = 6
 const MAX_RECONNECT_ATTEMPTS = 5
 
 type CaptionRecorderOptions = {
   sessionId: string
   presenterToken: string
+  vocabulary?: string
   onError: (message: string) => void
 }
+
+type PartialTranslation = { lang: string | null; zh: string | null; en: string | null }
 
 const toTraditional = OpenCC.Converter({ from: 'cn', to: 'tw' })
 
@@ -42,9 +47,9 @@ function floatToPcm16Base64(samples: Float32Array) {
   return btoa(binary)
 }
 
-async function mintStreamToken(sessionId: string, presenterToken: string) {
+async function mintStreamToken(sessionId: string, presenterToken: string, vocabulary: string) {
   const { data, error } = await requireSupabase().functions.invoke('caption-token', {
-    body: { sessionId, presenterToken },
+    body: { sessionId, presenterToken, vocabulary },
   })
   if (error) throw new Error('無法建立字幕連線，請稍後再試。')
   if (typeof data?.token !== 'string' || !data.token) throw new Error(data?.message || '無法建立字幕連線。')
@@ -55,7 +60,7 @@ async function mintStreamToken(sessionId: string, presenterToken: string) {
 // server-minted ephemeral token. Word-level partials go to viewers over a
 // Supabase broadcast channel; each VAD-finalized sentence is stored (and
 // translated) through the live-caption edge function.
-export async function startCaptionRecorder({ sessionId, presenterToken, onError }: CaptionRecorderOptions) {
+export async function startCaptionRecorder({ sessionId, presenterToken, vocabulary = '', onError }: CaptionRecorderOptions) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟即時字幕。')
 
   const supabase = requireSupabase()
@@ -67,11 +72,42 @@ export async function startCaptionRecorder({ sessionId, presenterToken, onError 
   broadcast.subscribe()
   let lastPartialSentAt = 0
   let partialText = ''
+  // Rolling translation of the in-progress sentence so cross-language viewers
+  // see the caption forming live instead of waiting for the sentence to end.
+  let partialTranslation: PartialTranslation = { lang: null, zh: null, en: null }
+  let lastTranslateAt = 0
+  let translateInFlight = false
+
   const sendPartial = (text: string, force = false) => {
     const now = Date.now()
     if (!force && now - lastPartialSentAt < PARTIAL_BROADCAST_MS) return
     lastPartialSentAt = now
-    void broadcast.send({ type: 'broadcast', event: 'partial', payload: { text } })
+    void broadcast.send({
+      type: 'broadcast',
+      event: 'partial',
+      payload: { text, lang: partialTranslation.lang, zh: partialTranslation.zh, en: partialTranslation.en },
+    })
+  }
+
+  const translatePartial = () => {
+    const now = Date.now()
+    if (translateInFlight || partialText.length < PARTIAL_TRANSLATE_MIN_CHARS || now - lastTranslateAt < PARTIAL_TRANSLATE_MS) return
+    translateInFlight = true
+    lastTranslateAt = now
+    const requestedFor = partialText
+    void supabase.functions
+      .invoke('live-caption', { body: { sessionId, presenterToken, transcript: requestedFor, translateOnly: true } })
+      .then(({ data }) => {
+        const translation = data?.translation as PartialTranslation | undefined
+        // Ignore if the sentence has been finalized since the request began.
+        if (!translation || !partialText) return
+        partialTranslation = translation
+        sendPartial(toTraditional(partialText), true)
+      })
+      .catch(() => null)
+      .finally(() => {
+        translateInFlight = false
+      })
   }
 
   let stopped = false
@@ -86,6 +122,7 @@ export async function startCaptionRecorder({ sessionId, presenterToken, onError 
 
   const finalizeSentence = (transcript: string) => {
     partialText = ''
+    partialTranslation = { lang: null, zh: null, en: null }
     sendPartial('', true)
     const text = transcript.trim()
     if (!text) return
@@ -103,7 +140,7 @@ export async function startCaptionRecorder({ sessionId, presenterToken, onError 
 
   const connect = async () => {
     if (stopped) return
-    const token = await mintStreamToken(sessionId, presenterToken)
+    const token = await mintStreamToken(sessionId, presenterToken, vocabulary)
     if (stopped) return
 
     const nextSocket = new WebSocket('wss://api.openai.com/v1/realtime', [
@@ -121,6 +158,7 @@ export async function startCaptionRecorder({ sessionId, presenterToken, onError 
         if (data.type === 'conversation.item.input_audio_transcription.delta' && typeof data.delta === 'string') {
           partialText += data.delta
           sendPartial(toTraditional(partialText))
+          translatePartial()
         } else if (data.type === 'conversation.item.input_audio_transcription.completed' && typeof data.transcript === 'string') {
           finalizeSentence(data.transcript)
         } else if (data.type === 'error') {

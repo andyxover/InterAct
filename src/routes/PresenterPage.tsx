@@ -84,6 +84,7 @@ export function PresenterPage() {
     const stored = localStorage.getItem('interact_caption_style')
     return stored === 'light' || stored === 'plain' ? stored : 'dark'
   })
+  const [captionVocabulary, setCaptionVocabulary] = useState(() => localStorage.getItem('interact_caption_vocab') || '')
 
   function changeCaptionDisplay(display: CaptionDisplay) {
     setCaptionDisplay(display)
@@ -100,6 +101,11 @@ export function PresenterPage() {
   function changeCaptionStyle(style: CaptionStyle) {
     setCaptionStyle(style)
     localStorage.setItem('interact_caption_style', style)
+  }
+
+  function changeCaptionVocabulary(vocabulary: string) {
+    setCaptionVocabulary(vocabulary)
+    localStorage.setItem('interact_caption_vocab', vocabulary)
   }
 
   useEffect(() => {
@@ -121,6 +127,7 @@ export function PresenterPage() {
         stopRecorder = await startCaptionRecorder({
           sessionId,
           presenterToken,
+          vocabulary: localStorage.getItem('interact_caption_vocab') || '',
           onError: (message) => setAnalysisError(`即時字幕：${message}`),
         })
         if (cancelled) stopRecorder()
@@ -943,6 +950,8 @@ export function PresenterPage() {
           onChangeCaptionSize={changeCaptionSize}
           captionStyle={captionStyle}
           onChangeCaptionStyle={changeCaptionStyle}
+          captionVocabulary={captionVocabulary}
+          onChangeCaptionVocabulary={changeCaptionVocabulary}
           onToggleAnonymous={() => updateSession({ anonymous_enabled: !session.anonymous_enabled })}
           onToggleCaptions={() => setCaptionsOn((current) => !current)}
           onToggleDanmaku={() => updateSession({ danmaku_enabled: !session.danmaku_enabled })}

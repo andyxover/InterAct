@@ -1,9 +1,13 @@
 import { useEffect, useRef, useState } from 'react'
+import { finalTextFor, partialTextFor } from '../lib/captionText'
+import type { CaptionPartial } from '../lib/captionText'
+import { subscribeLivePartials } from '../lib/livePartials'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
 import type { Caption } from '../types'
 
 const CAPTION_VISIBLE_MS = 12_000
 const PARTIAL_STALE_MS = 8_000
+const EMPTY_PARTIAL: CaptionPartial = { text: '' }
 
 type Props = {
   sessionId: string
@@ -26,15 +30,22 @@ function storedCaptionAppearance(): CaptionAppearance {
   }
 }
 
+function storedParticipantSize() {
+  const stored = localStorage.getItem('interact_participant_caption_size')
+  return stored === 'sm' || stored === 'lg' ? stored : 'md'
+}
+
 export function CaptionBar({ sessionId, mode }: Props) {
   const [caption, setCaption] = useState<Caption | null>(null)
-  // In-progress speech streamed word-by-word from the presenter, shown until
-  // the finalized (and translated) caption row replaces it.
-  const [partial, setPartial] = useState('')
+  // In-progress speech streamed word-by-word from the presenter (with rolling
+  // translations), shown until the finalized caption row replaces it.
+  const [partial, setPartial] = useState<CaptionPartial>(EMPTY_PARTIAL)
   // Presenter-chosen classroom display language, size, and style; the
   // presenter panel writes them to localStorage and this overlay window
   // follows via storage events.
   const [appearance, setAppearance] = useState<CaptionAppearance>(storedCaptionAppearance)
+  // Student-chosen size on their own phone (set from the transcript panel).
+  const [participantSize, setParticipantSize] = useState(storedParticipantSize)
   const { display } = appearance
   const hideTimerRef = useRef(0)
   const partialTimerRef = useRef(0)
@@ -44,6 +55,13 @@ export function CaptionBar({ sessionId, mode }: Props) {
     const syncAppearance = () => setAppearance(storedCaptionAppearance())
     window.addEventListener('storage', syncAppearance)
     return () => window.removeEventListener('storage', syncAppearance)
+  }, [mode])
+
+  useEffect(() => {
+    if (mode === 'overlay') return
+    const syncSize = () => setParticipantSize(storedParticipantSize())
+    window.addEventListener('interact:caption-size', syncSize)
+    return () => window.removeEventListener('interact:caption-size', syncSize)
   }, [mode])
 
   useEffect(() => {
@@ -58,44 +76,47 @@ export function CaptionBar({ sessionId, mode }: Props) {
       })
       .subscribe()
 
-    const liveChannel = supabase
-      .channel(`caption-live:${sessionId}`)
-      .on('broadcast', { event: 'partial' }, (message) => {
-        const text = typeof message.payload?.text === 'string' ? message.payload.text : ''
-        setPartial(text)
-        window.clearTimeout(partialTimerRef.current)
-        if (text) partialTimerRef.current = window.setTimeout(() => setPartial(''), PARTIAL_STALE_MS)
-      })
-      .subscribe()
+    const unsubscribePartials = subscribeLivePartials(sessionId, (next) => {
+      setPartial(next)
+      window.clearTimeout(partialTimerRef.current)
+      if (next.text) partialTimerRef.current = window.setTimeout(() => setPartial(EMPTY_PARTIAL), PARTIAL_STALE_MS)
+    })
 
     return () => {
       window.clearTimeout(hideTimerRef.current)
       window.clearTimeout(partialTimerRef.current)
       supabase.removeChannel(channel)
-      supabase.removeChannel(liveChannel)
+      unsubscribePartials()
     }
   }, [mode, sessionId])
 
   const overlayClasses = `caption-bar caption-bar-overlay caption-size-${appearance.size} caption-style-${appearance.style}`
+  const participantClasses = `caption-bar caption-bar-participant participant-caption-${participantSize}`
 
-  // In English-only classroom display, live partials (which arrive in the
-  // spoken language) are hidden; sentences appear once translated.
-  const partialsVisible = mode !== 'overlay' || display !== 'en'
-  if (partial && partialsVisible) {
-    return (
-      <div aria-live="polite" className={mode === 'overlay' ? overlayClasses : 'caption-bar caption-bar-participant'}>
-        <p className="caption-primary caption-live">{partial}</p>
-      </div>
-    )
+  if (partial.text) {
+    const partialText = mode === 'overlay'
+      ? partialTextFor(partial, display === 'en' ? 'en' : 'zh', display === 'en')
+      : partialTextFor(partial, mode === 'en' ? 'en' : 'zh')
+    const partialSecondary = mode === 'overlay' && display === 'both'
+      ? partialTextFor(partial, 'en', true)
+      : ''
+    if (partialText) {
+      return (
+        <div aria-live="polite" className={mode === 'overlay' ? overlayClasses : participantClasses}>
+          <p className="caption-primary caption-live">{partialText}</p>
+          {partialSecondary && partialSecondary !== partialText && (
+            <p className="caption-secondary caption-live">{partialSecondary}</p>
+          )}
+        </div>
+      )
+    }
   }
 
   if (!caption) return null
 
   if (mode === 'overlay') {
-    // Transcription may come back in simplified characters; prefer the
-    // Traditional Chinese rendering on the classroom screen.
-    const chinese = (caption.original_lang === 'zh' && caption.text_zh) || caption.text_zh || caption.original
-    const english = caption.text_en || (caption.original_lang === 'en' ? caption.original : null)
+    const chinese = finalTextFor(caption, 'zh')
+    const english = finalTextFor(caption, 'en')
     const primary = display === 'en' ? english : chinese
     if (!primary) return null
     const secondary = display === 'both' && english && english !== primary ? english : null
@@ -107,11 +128,9 @@ export function CaptionBar({ sessionId, mode }: Props) {
     )
   }
 
-  const text = mode === 'en'
-    ? caption.text_en || caption.original
-    : caption.text_zh || caption.original
+  const text = finalTextFor(caption, mode === 'en' ? 'en' : 'zh') || caption.original
   return (
-    <div aria-live="polite" className="caption-bar caption-bar-participant">
+    <div aria-live="polite" className={participantClasses}>
       <p className="caption-primary">{text}</p>
     </div>
   )

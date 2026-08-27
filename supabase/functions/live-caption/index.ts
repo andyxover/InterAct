@@ -119,6 +119,14 @@ Deno.serve(async (req) => {
     const { data: session } = await supabase.from('sessions').select('id, status').eq('id', sessionId).single()
     if (!session || session.status !== 'active') return jsonResponse({ message: '場次已結束，無法產生字幕。' }, 409)
 
+    // translateOnly: translate an in-progress partial for live cross-language
+    // display without storing anything.
+    if (input.translateOnly === true) {
+      if (!providedTranscript) return jsonResponse({ message: '缺少字幕所需資料。' }, 400)
+      const partial = await translate(apiKey, providedTranscript)
+      return jsonResponse({ translation: partial })
+    }
+
     let transcript = providedTranscript
     if (!transcript) {
       const audio = base64ToBytes(audioBase64)

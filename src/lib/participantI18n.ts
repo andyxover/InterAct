@@ -21,6 +21,7 @@ const messages = {
     winnerIs: '得獎的是', canBuzz: '現在可以搶答', waitPresenter: '請等待主講者開始', submitting: '送出中', buzz: '搶答', preparing: '準備中',
     sessionGoneTitle: '這場次已經莎喲娜啦了！', sessionGoneMessage: '下回請早！',
     interpretation: '即時口譯', interpretationHint: '開啟後，講者說外語時會用語音唸出翻譯（建議戴耳機）',
+    transcriptTitle: '逐字稿', transcriptEmpty: '講者開啟字幕後，逐字稿會顯示在這裡。', closeLabel: '關閉',
   },
   en: {
     language: 'Language', chinese: '繁體中文', english: 'English', courseEnded: 'Class ended', classDismissed: 'That’s a wrap!',
@@ -42,6 +43,7 @@ const messages = {
     winnerIs: 'The winner is', canBuzz: 'Buzz in now', waitPresenter: 'Wait for the presenter to start', submitting: 'Sending', buzz: 'Buzz', preparing: 'Get ready',
     sessionGoneTitle: 'This session has said its sayonara!', sessionGoneMessage: 'Catch the next one bright and early!',
     interpretation: 'Live interpreter', interpretationHint: 'Speaks a translated voice-over when the presenter uses another language (headphones recommended)',
+    transcriptTitle: 'Transcript', transcriptEmpty: 'The live transcript appears here once the presenter turns on captions.', closeLabel: 'Close',
   },
 } as const
 
