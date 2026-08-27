@@ -71,6 +71,10 @@ export function CaptionBar({ sessionId, mode }: Props) {
       .channel(`captions:${sessionId}:${mode}`)
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'captions', filter: `session_id=eq.${sessionId}` }, (payload) => {
         setCaption(payload.new as Caption)
+        // The finalized caption supersedes the lingering partial of the same
+        // sentence (the presenter no longer clears it, to avoid a blank gap).
+        setPartial(EMPTY_PARTIAL)
+        window.clearTimeout(partialTimerRef.current)
         window.clearTimeout(hideTimerRef.current)
         hideTimerRef.current = window.setTimeout(() => setCaption(null), CAPTION_VISIBLE_MS)
       })

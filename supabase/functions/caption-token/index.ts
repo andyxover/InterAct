@@ -10,9 +10,10 @@ function turnDetection() {
   // produces better-shaped captions from continuous speakers. Overridable in
   // case the account or model rejects it.
   const type = Deno.env.get('OPENAI_TURN_DETECTION') || 'semantic_vad'
+  const eagerness = Deno.env.get('OPENAI_VAD_EAGERNESS') || 'high'
   return type === 'server_vad'
     ? { type: 'server_vad', silence_duration_ms: 600 }
-    : { type: 'semantic_vad', eagerness: 'medium' }
+    : { type: 'semantic_vad', eagerness }
 }
 
 // Mints a short-lived OpenAI Realtime transcription token so the presenter

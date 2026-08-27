@@ -3,8 +3,8 @@ import { requireSupabase } from './supabase'
 
 const TARGET_SAMPLE_RATE = 24000
 const PARTIAL_BROADCAST_MS = 250
-const PARTIAL_TRANSLATE_MS = 2200
-const PARTIAL_TRANSLATE_MIN_CHARS = 6
+const PARTIAL_TRANSLATE_MS = 1000
+const PARTIAL_TRANSLATE_MIN_CHARS = 4
 const MAX_RECONNECT_ATTEMPTS = 5
 
 type CaptionRecorderOptions = {
@@ -107,6 +107,9 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
       .catch(() => null)
       .finally(() => {
         translateInFlight = false
+        // If the sentence kept growing while this request ran, chase it
+        // immediately instead of waiting for the next delta.
+        if (partialText && partialText !== requestedFor) translatePartial()
       })
   }
 
@@ -121,9 +124,13 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
   }
 
   const finalizeSentence = (transcript: string) => {
+    // Keep the last partial on viewers' screens while the finalized (and
+    // fully translated) caption is being produced — clearing here left a
+    // blank gap that read as latency. Viewers replace the partial themselves
+    // when the caption INSERT arrives.
     partialText = ''
     partialTranslation = { lang: null, zh: null, en: null }
-    sendPartial('', true)
+    lastTranslateAt = 0
     const text = transcript.trim()
     if (!text) return
     void supabase.functions

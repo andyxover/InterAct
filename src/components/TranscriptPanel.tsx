@@ -66,6 +66,8 @@ export function TranscriptPanel({ sessionId, locale }: Props) {
       .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'captions', filter: `session_id=eq.${sessionId}` }, (payload) => {
         const next = payload.new as Caption
         setCaptions((current) => (current.some((item) => item.id === next.id) ? current : [...current.slice(-HISTORY_LIMIT + 1), next]))
+        // The finalized line replaces the in-progress partial of that sentence.
+        setPartial(EMPTY_PARTIAL)
       })
       .subscribe()
 
