@@ -1,6 +1,6 @@
 import type { CaptionStatus } from '../lib/liveCaptions'
 import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, Headphones, MessageSquare, MonitorUp, RefreshCw, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
-import type { InterpreterLanguage, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
+import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
 import type { Session } from '../types'
 
 export type CaptionDisplay = 'zh' | 'en' | 'both'
@@ -36,6 +36,8 @@ type Props = {
   interpreterStatus: InterpreterStatus
   interpreterLanguage: InterpreterLanguage
   onChangeInterpreterLanguage: (language: InterpreterLanguage) => void
+  interpreterOutput: InterpreterOutput
+  onChangeInterpreterOutputMode: (output: InterpreterOutput) => void
   interpreterOutputId: string
   interpreterOutputs: OutputDevice[]
   onChangeInterpreterOutput: (deviceId: string) => void
@@ -74,6 +76,8 @@ export function PresenterControlPanel({
   interpreterStatus,
   interpreterLanguage,
   onChangeInterpreterLanguage,
+  interpreterOutput,
+  onChangeInterpreterOutputMode,
   interpreterOutputId,
   interpreterOutputs,
   onChangeInterpreterOutput,
@@ -185,7 +189,11 @@ export function PresenterControlPanel({
           <p className={`caption-status caption-status-${interpreterStatus.state}`} role="status">
             <span className="caption-status-dot" aria-hidden="true" />
             {interpreterStatus.state === 'connecting' && '口譯連線中…'}
-            {interpreterStatus.state === 'live' && `口譯直播中 → ${interpreterOutputs.find((d) => d.deviceId === interpreterOutputId)?.label ?? '系統預設輸出'}`}
+            {interpreterStatus.state === 'live' && [
+              '口譯直播中',
+              interpreterOutput !== 'phones' ? `→ ${interpreterOutputs.find((d) => d.deviceId === interpreterOutputId)?.label ?? '系統預設輸出'}` : '',
+              interpreterOutput !== 'device' ? `· ${interpreterStatus.listeners} 支手機收聽中` : '',
+            ].filter(Boolean).join(' ')}
             {interpreterStatus.state === 'reconnecting' && `口譯重新連線中（第 ${interpreterStatus.attempt} 次）…`}
             {interpreterStatus.state === 'silent' && '沒有收到麥克風聲音 — 請檢查麥克風是否靜音或選錯裝置'}
             {interpreterStatus.state === 'error' && `口譯發生問題：${interpreterStatus.message}`}
@@ -209,6 +217,25 @@ export function PresenterControlPanel({
                 </button>
               ))}
             </div>
+            <div className="caption-display-row" role="radiogroup" aria-label="口譯輸出">
+              <span className="caption-display-label">送到</span>
+              {([['device', '耳機 / SKAA'], ['phones', '學生手機'], ['both', '兩者']] as Array<[InterpreterOutput, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  aria-checked={interpreterOutput === value}
+                  className={`caption-display-option${interpreterOutput === value ? ' is-active' : ''}`}
+                  role="radio"
+                  type="button"
+                  onClick={() => onChangeInterpreterOutputMode(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {interpreterOutput !== 'device' && (
+              <p className="caption-hint">學生在手機上按「即時口譯」就會直接收到你的口譯聲音（同一個 Wi-Fi 最順）。</p>
+            )}
+            {interpreterOutput !== 'phones' && (
             <label className="caption-vocab-row">
               <span className="caption-display-label">輸出到</span>
               <select
@@ -225,10 +252,13 @@ export function PresenterControlPanel({
                 <RefreshCw size={14} />
               </button>
             </label>
+            )}
+            {interpreterOutput !== 'phones' && (
             <p className="caption-hint">
               把 SKAA 發射器接上電腦後，在「輸出到」選它，再把耳機發給需要的學生。
               不要選教室喇叭：麥克風會把口譯聲音收回去再翻一次。
             </p>
+            )}
             {interpreterText && <p className="interp-text" aria-live="polite">{interpreterText}</p>}
           </>
         )}

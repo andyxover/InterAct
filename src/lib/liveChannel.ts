@@ -31,6 +31,7 @@ type Entry = {
   finalListeners: Set<FinalListener>
   seen: Set<string>
   fallback: RealtimeChannel | null
+  eventListeners: Map<string, Set<(payload: unknown) => void>>
 }
 
 const entries = new Map<string, Entry>()
@@ -51,10 +52,17 @@ function entryFor(sessionId: string): Entry {
       const caption = (message.payload as { caption?: Caption } | undefined)?.caption
       if (caption && typeof caption.id === 'string') deliverFinal(sessionId, caption)
     })
+    // Everything else on the channel — the interpreter's signalling — goes to
+    // whoever asked for that event by name.
+    .on('broadcast', { event: '*' }, (message) => {
+      const event = typeof message.event === 'string' ? message.event : ''
+      const listeners = entries.get(sessionId)?.eventListeners.get(event)
+      if (listeners) listeners.forEach((listener) => listener(message.payload))
+    })
     .subscribe((status) => {
       if (status === 'SUBSCRIBED') resolveJoined()
     })
-  entry = { channel, joined, partialListeners: new Set(), finalListeners: new Set(), seen: new Set(), fallback: null }
+  entry = { channel, joined, partialListeners: new Set(), finalListeners: new Set(), seen: new Set(), fallback: null, eventListeners: new Map() }
   entries.set(sessionId, entry)
   return entry
 }
@@ -106,4 +114,26 @@ export function subscribeLiveFinals(sessionId: string, callback: FinalListener) 
   return () => {
     entries.get(sessionId)?.finalListeners.delete(callback)
   }
+}
+
+/** Listen for one named broadcast event on the session channel. */
+export function onLiveEvent(sessionId: string, event: string, callback: (payload: unknown) => void) {
+  if (!isSupabaseConfigured || !sessionId) return () => {}
+  const entry = entryFor(sessionId)
+  let set = entry.eventListeners.get(event)
+  if (!set) {
+    set = new Set()
+    entry.eventListeners.set(event, set)
+  }
+  set.add(callback)
+  return () => {
+    entries.get(sessionId)?.eventListeners.get(event)?.delete(callback)
+  }
+}
+
+/** Send one named broadcast event on the session channel, once it has joined. */
+export async function sendLive(sessionId: string, event: string, payload: Record<string, unknown>) {
+  if (!isSupabaseConfigured || !sessionId) return
+  const channel = await liveChannelReady(sessionId)
+  await channel.send({ type: 'broadcast', event, payload })
 }

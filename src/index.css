@@ -3895,3 +3895,9 @@ h2 {
   -webkit-line-clamp: 3;
   -webkit-box-orient: vertical;
 }
+
+.interpretation-toggle.is-live {
+  background: #0f766e;
+  border-color: #0f766e;
+  color: #fff;
+}

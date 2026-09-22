@@ -18,7 +18,7 @@ import { finalizeLottery } from '../lib/lottery'
 import { startCaptionRecorder } from '../lib/liveCaptions'
 import type { CaptionStatus } from '../lib/liveCaptions'
 import { listOutputDevices, startInterpreter } from '../lib/liveInterpreter'
-import type { InterpreterLanguage, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
+import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -84,6 +84,7 @@ export function PresenterPage() {
   const [interpreterOn, setInterpreterOn] = useState(false)
   const [interpreterStatus, setInterpreterStatus] = useState<InterpreterStatus>({ state: 'off' })
   const [interpreterLanguage, setInterpreterLanguage] = useState<InterpreterLanguage>(() => (localStorage.getItem('interact_interp_lang') === 'zh' ? 'zh' : 'en'))
+  const [interpreterOutput, setInterpreterOutput] = useState<InterpreterOutput>(() => { const v = localStorage.getItem('interact_interp_mode'); return v === 'phones' || v === 'both' ? v : 'device' })
   const [interpreterOutputId, setInterpreterOutputId] = useState(() => localStorage.getItem('interact_interp_output') || '')
   const [interpreterOutputs, setInterpreterOutputs] = useState<OutputDevice[]>([])
   const [interpreterText, setInterpreterText] = useState('')
@@ -135,6 +136,10 @@ export function PresenterPage() {
     setInterpreterLanguage(language)
     localStorage.setItem('interact_interp_lang', language)
   }
+  function changeInterpreterOutputMode(output: InterpreterOutput) {
+    setInterpreterOutput(output)
+    localStorage.setItem('interact_interp_mode', output)
+  }
   function changeInterpreterOutput(deviceId: string) {
     setInterpreterOutputId(deviceId)
     localStorage.setItem('interact_interp_output', deviceId)
@@ -160,6 +165,7 @@ export function PresenterPage() {
           sessionId,
           presenterToken,
           language: interpreterLanguage,
+          output: interpreterOutput,
           outputDeviceId: interpreterOutputId,
           onStatus: setInterpreterStatus,
           onText: setInterpreterText,
@@ -179,7 +185,7 @@ export function PresenterPage() {
       setInterpreterStatus((current) => (current.state === 'error' ? current : { state: 'off' }))
     }
     // Language and device changes restart the interpreter on purpose.
-  }, [interpreterOn, interpreterLanguage, interpreterOutputId, refreshInterpreterOutputs, sessionId])
+  }, [interpreterOn, interpreterLanguage, interpreterOutput, interpreterOutputId, refreshInterpreterOutputs, sessionId])
 
   useEffect(() => {
     if (!captionsOn) return
@@ -1024,6 +1030,8 @@ export function PresenterPage() {
           interpreterStatus={interpreterStatus}
           interpreterLanguage={interpreterLanguage}
           onChangeInterpreterLanguage={changeInterpreterLanguage}
+          interpreterOutput={interpreterOutput}
+          onChangeInterpreterOutputMode={changeInterpreterOutputMode}
           interpreterOutputId={interpreterOutputId}
           interpreterOutputs={interpreterOutputs}
           onChangeInterpreterOutput={changeInterpreterOutput}

@@ -1,22 +1,31 @@
+import { onLiveEvent, sendLive } from './liveChannel'
 import { requireSupabase } from './supabase'
 
 // The live interpreter: the presenter's voice, translated as speech while
-// they are still talking, played out of THIS machine.
+// they are still talking.
 //
 // One OpenAI translation session streams microphone audio up and translated
 // audio (24 kHz PCM) plus translated text back, phrase by phrase, about a
-// second behind the speaker. The audio goes to an output device the presenter
-// chooses — a SKAA transmitter, so every student holding a SKAA headphone
-// hears the interpretation with radio latency and nothing to install — and
-// not to the room's own speakers, which the microphone would hear and
-// translate again.
+// second behind the speaker. Where that audio goes is the presenter's choice:
+//
+//   device — an output on this machine. A SKAA transmitter, so every student
+//            holding a SKAA headphone hears it with radio latency and nothing
+//            to install. Never the room's speakers, which the microphone would
+//            hear and translate again.
+//   phones — each listening student's phone, over WebRTC straight from this
+//            laptop across the classroom network. The signalling (offer,
+//            answer, ICE) rides the session's broadcast channel; a phone that
+//            cannot connect falls back on its own to spoken captions.
+//
+// Both at once is fine: some students on headphones, the rest on phones.
 
 export type InterpreterLanguage = 'en' | 'zh'
+export type InterpreterOutput = 'device' | 'phones' | 'both'
 
 export type InterpreterStatus =
   | { state: 'off' }
   | { state: 'connecting' }
-  | { state: 'live' }
+  | { state: 'live'; listeners: number }
   | { state: 'reconnecting'; attempt: number }
   | { state: 'silent' }
   | { state: 'error'; message: string }
@@ -27,6 +36,7 @@ type Options = {
   sessionId: string
   presenterToken: string
   language: InterpreterLanguage
+  output: InterpreterOutput
   /** Output device id from listOutputDevices(); empty for the system default. */
   outputDeviceId?: string
   onStatus?: (status: InterpreterStatus) => void
@@ -36,14 +46,13 @@ type Options = {
 
 const SAMPLE_RATE = 24000
 const MAX_RECONNECT_ATTEMPTS = 8
-// Each chunk is scheduled right after the previous one so the voice is
-// continuous; after a stall, restart just ahead of now instead of piling up
-// delay.
 const LEAD_S = 0.05
 const KEEP_TEXT_CHARS = 400
-// No microphone energy for this long while live is said, not guessed at.
 const SILENCE_WARN_MS = 12000
 const SILENCE_RMS = 0.004
+const STATE_HEARTBEAT_MS = 8000
+const MAX_PEERS = 60
+const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 
 async function mintTranslationToken(sessionId: string, presenterToken: string, language: InterpreterLanguage) {
   const { data, error } = await requireSupabase().functions.invoke('translate-token', {
@@ -114,36 +123,41 @@ export async function listOutputDevices(): Promise<OutputDevice[]> {
 
 type SinkAudioContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> }
 
-export async function startInterpreter({ sessionId, presenterToken, language, outputDeviceId = '', onStatus, onText }: Options) {
+export async function startInterpreter({ sessionId, presenterToken, language, output, outputDeviceId = '', onStatus, onText }: Options) {
   const setStatus = (status: InterpreterStatus) => onStatus?.(status)
   setStatus({ state: 'connecting' })
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟口譯。')
+  const toDevice = output === 'device' || output === 'both'
+  const toPhones = output === 'phones' || output === 'both'
 
-  // Output: its own context so the chosen device applies to it alone.
-  const output = new AudioContext({ sampleRate: SAMPLE_RATE }) as SinkAudioContext
-  if (outputDeviceId && outputDeviceId !== 'default') {
-    if (typeof output.setSinkId !== 'function') {
-      void output.close()
+  // Output graph: one context. The device path is the context's own
+  // destination (on the chosen sink); the phones path is a MediaStream
+  // destination whose track every peer connection carries.
+  const outCtx = new AudioContext({ sampleRate: SAMPLE_RATE }) as SinkAudioContext
+  if (toDevice && outputDeviceId && outputDeviceId !== 'default') {
+    if (typeof outCtx.setSinkId !== 'function') {
+      void outCtx.close()
       throw new Error('這個環境無法選擇音訊輸出裝置。')
     }
     try {
-      await output.setSinkId(outputDeviceId)
+      await outCtx.setSinkId(outputDeviceId)
     } catch {
-      void output.close()
+      void outCtx.close()
       throw new Error('找不到選擇的輸出裝置，請重新整理裝置清單後再選一次。')
     }
   }
+  const phoneDestination = toPhones ? outCtx.createMediaStreamDestination() : null
 
   // Input: the microphone, as 24 kHz PCM16. Echo cancellation stays on so
-  // that whatever leaks from the output device into the room is not fed back.
+  // whatever leaks from an output into the room is not fed back.
   const stream = await navigator.mediaDevices.getUserMedia({
     audio: { echoCancellation: true, noiseSuppression: true },
-  }).catch(() => { void output.close(); throw new Error('無法使用麥克風，請確認已允許 InterAct 錄音。') })
-  const input = new AudioContext()
-  const source = input.createMediaStreamSource(stream)
+  }).catch(() => { void outCtx.close(); throw new Error('無法使用麥克風，請確認已允許 InterAct 錄音。') })
+  const inCtx = new AudioContext()
+  const source = inCtx.createMediaStreamSource(stream)
   // ScriptProcessorNode is deprecated but works everywhere without a worker,
   // which the app's CSP (script-src 'self') would block as a blob module.
-  const processor = input.createScriptProcessor(4096, 1, 1)
+  const processor = inCtx.createScriptProcessor(4096, 1, 1)
 
   let stopped = false
   let socket: WebSocket | null = null
@@ -153,6 +167,12 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   let text = ''
   let lastLoudAt = Date.now()
   let silentWarned = false
+  const peers = new Map<string, RTCPeerConnection>()
+
+  const refreshStatus = () => {
+    if (stopped || !live || silentWarned) return
+    setStatus({ state: 'live', listeners: peers.size })
+  }
 
   processor.onaudioprocess = (event) => {
     if (stopped) return
@@ -160,7 +180,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
     const now = Date.now()
     if (rms(samples) > SILENCE_RMS) {
       lastLoudAt = now
-      if (silentWarned && live) { silentWarned = false; setStatus({ state: 'live' }) }
+      if (silentWarned && live) { silentWarned = false; refreshStatus() }
     } else if (live && !silentWarned && now - lastLoudAt > SILENCE_WARN_MS) {
       silentWarned = true
       setStatus({ state: 'silent' })
@@ -168,17 +188,15 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
     if (socket?.readyState !== WebSocket.OPEN) return
     socket.send(JSON.stringify({
       type: 'session.input_audio_buffer.append',
-      audio: floatToPcm16Base64(downsampleTo24k(samples, input.sampleRate)),
+      audio: floatToPcm16Base64(downsampleTo24k(samples, inCtx.sampleRate)),
     }))
   }
   source.connect(processor)
-  processor.connect(input.destination)
+  processor.connect(inCtx.destination)
 
-  // A browser suspends an audio graph when it feels like it; a suspended
-  // graph sends nothing and plays nothing. Resume both, now and on return.
   const resume = () => {
-    if (input.state === 'suspended') void input.resume().catch(() => null)
-    if (output.state === 'suspended') void output.resume().catch(() => null)
+    if (inCtx.state === 'suspended') void inCtx.resume().catch(() => null)
+    if (outCtx.state === 'suspended') void outCtx.resume().catch(() => null)
   }
   resume()
   document.addEventListener('visibilitychange', resume)
@@ -187,15 +205,18 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   const play = (base64: string) => {
     const samples = pcm16Base64ToFloat32(base64)
     if (!samples.length) return
-    const buffer = output.createBuffer(1, samples.length, SAMPLE_RATE)
+    const buffer = outCtx.createBuffer(1, samples.length, SAMPLE_RATE)
     buffer.copyToChannel(samples, 0)
-    const node = output.createBufferSource()
+    const node = outCtx.createBufferSource()
     node.buffer = buffer
-    node.connect(output.destination)
-    const startAt = Math.max(output.currentTime + LEAD_S, nextPlayAt)
+    if (toDevice) node.connect(outCtx.destination)
+    if (phoneDestination) node.connect(phoneDestination)
+    const startAt = Math.max(outCtx.currentTime + LEAD_S, nextPlayAt)
     node.start(startAt)
     nextPlayAt = startAt + buffer.duration
   }
+
+  // --- The translation socket ---------------------------------------------
 
   const connect = async () => {
     if (stopped) return
@@ -210,7 +231,8 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
       reconnectAttempts = 0
       live = true
       nextSocket.send(JSON.stringify({ type: 'session.update', session: { audio: { output: { language } } } }))
-      setStatus({ state: 'live' })
+      refreshStatus()
+      announce()
     }
     nextSocket.onmessage = (event) => {
       try {
@@ -233,6 +255,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
       reconnectAttempts += 1
       if (reconnectAttempts > MAX_RECONNECT_ATTEMPTS) {
         setStatus({ state: 'error', message: '口譯連線中斷，請關閉口譯後再重新開啟。' })
+        announce()
         return
       }
       setStatus({ state: 'reconnecting', attempt: reconnectAttempts })
@@ -244,18 +267,100 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
     }
   }
 
+  // --- Phones, over WebRTC -------------------------------------------------
+  //
+  // The presenter announces "interpreting into <language>" every few seconds
+  // and whenever it changes. A phone that wants it sends an offer; the
+  // presenter answers with the translated-audio track attached. Everything
+  // rides the session channel by name; nothing here touches the database.
+
+  const announce = () => {
+    void sendLive(sessionId, 'interp-state', {
+      on: !stopped && live && toPhones,
+      language,
+    })
+  }
+
+  const closePeer = (participantId: string) => {
+    const pc = peers.get(participantId)
+    if (!pc) return
+    pc.close()
+    peers.delete(participantId)
+    refreshStatus()
+  }
+
+  const handleOffer = async (payload: unknown) => {
+    if (!phoneDestination || stopped) return
+    const { participantId, lang, sdp } = (payload ?? {}) as { participantId?: unknown; lang?: unknown; sdp?: unknown }
+    if (typeof participantId !== 'string' || typeof sdp !== 'string' || !participantId || !sdp) return
+    if (lang !== language) {
+      void sendLive(sessionId, 'rtc-answer', { participantId, error: 'language_unavailable' })
+      return
+    }
+    if (peers.size >= MAX_PEERS && !peers.has(participantId)) {
+      void sendLive(sessionId, 'rtc-answer', { participantId, error: 'full' })
+      return
+    }
+    closePeer(participantId)
+    const pc = new RTCPeerConnection({ iceServers: ICE_SERVERS })
+    peers.set(participantId, pc)
+    const [track] = phoneDestination.stream.getAudioTracks()
+    pc.addTrack(track, phoneDestination.stream)
+    pc.onicecandidate = (event) => {
+      if (!event.candidate) return
+      void sendLive(sessionId, 'rtc-ice', { participantId, to: 'participant', candidate: event.candidate.toJSON() })
+    }
+    pc.onconnectionstatechange = () => {
+      if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') closePeer(participantId)
+      else refreshStatus()
+    }
+    try {
+      await pc.setRemoteDescription({ type: 'offer', sdp })
+      const answer = await pc.createAnswer()
+      await pc.setLocalDescription(answer)
+      await sendLive(sessionId, 'rtc-answer', { participantId, sdp: answer.sdp })
+    } catch {
+      closePeer(participantId)
+    }
+  }
+
+  const handleIce = async (payload: unknown) => {
+    const { participantId, to, candidate } = (payload ?? {}) as { participantId?: unknown; to?: unknown; candidate?: RTCIceCandidateInit }
+    if (to !== 'presenter' || typeof participantId !== 'string' || !candidate) return
+    const pc = peers.get(participantId)
+    if (!pc) return
+    try { await pc.addIceCandidate(candidate) } catch { /* stale candidate */ }
+  }
+
+  const unsubscribes = toPhones
+    ? [
+        onLiveEvent(sessionId, 'rtc-offer', (payload) => { void handleOffer(payload) }),
+        onLiveEvent(sessionId, 'rtc-ice', (payload) => { void handleIce(payload) }),
+        onLiveEvent(sessionId, 'rtc-hello', () => announce()),
+        onLiveEvent(sessionId, 'rtc-bye', (payload) => {
+          const participantId = (payload as { participantId?: unknown } | undefined)?.participantId
+          if (typeof participantId === 'string') closePeer(participantId)
+        }),
+      ]
+    : []
+  const heartbeat = toPhones ? window.setInterval(announce, STATE_HEARTBEAT_MS) : 0
+
   const teardown = () => {
     window.clearInterval(resumeTimer)
+    window.clearInterval(heartbeat)
     document.removeEventListener('visibilitychange', resume)
+    unsubscribes.forEach((off) => off())
+    for (const pc of peers.values()) pc.close()
+    peers.clear()
     processor.disconnect()
     source.disconnect()
     stream.getTracks().forEach((track) => track.stop())
-    void input.close()
+    void inCtx.close()
     const current = socket
     socket = null
     if (current?.readyState === WebSocket.OPEN) current.send(JSON.stringify({ type: 'session.close' }))
     current?.close()
-    void output.close()
+    void outCtx.close()
   }
 
   try {
@@ -269,6 +374,8 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
 
   return () => {
     stopped = true
+    live = false
+    if (toPhones) void sendLive(sessionId, 'interp-state', { on: false, language })
     teardown()
     setStatus({ state: 'off' })
   }
