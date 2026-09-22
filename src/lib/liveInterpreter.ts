@@ -52,6 +52,7 @@ const SILENCE_WARN_MS = 12000
 const SILENCE_RMS = 0.004
 const STATE_HEARTBEAT_MS = 8000
 const MAX_PEERS = 60
+const DISCONNECT_GRACE_MS = 10000
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
 
 async function mintTranslationToken(sessionId: string, presenterToken: string, language: InterpreterLanguage) {
@@ -310,9 +311,21 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
       if (!event.candidate) return
       void sendLive(sessionId, 'rtc-ice', { participantId, to: 'participant', candidate: event.candidate.toJSON() })
     }
+    let grace = 0
     pc.onconnectionstatechange = () => {
-      if (pc.connectionState === 'failed' || pc.connectionState === 'closed' || pc.connectionState === 'disconnected') closePeer(participantId)
-      else refreshStatus()
+      if (peers.get(participantId) !== pc) return
+      const state = pc.connectionState
+      if (state === 'connected') {
+        window.clearTimeout(grace)
+        grace = 0
+        refreshStatus()
+      } else if (state === 'disconnected') {
+        // A phone changing access points or waking up; the phone side will
+        // re-offer if it really is gone.
+        if (!grace) grace = window.setTimeout(() => { grace = 0; if (peers.get(participantId) === pc && pc.connectionState !== 'connected') closePeer(participantId) }, DISCONNECT_GRACE_MS)
+      } else if (state === 'failed' || state === 'closed') {
+        closePeer(participantId)
+      }
     }
     try {
       await pc.setRemoteDescription({ type: 'offer', sdp })
