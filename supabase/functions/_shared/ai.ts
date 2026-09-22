@@ -26,21 +26,24 @@ function retryableStatus(status: number) {
 
 export function geminiModels(profile: AiProfile) {
   if (profile === 'deep') {
-    const primary = Deno.env.get('GEMINI_DEEP_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.7-flash'
-    const fallback = Deno.env.get('GEMINI_DEEP_FALLBACK_MODEL') || Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.6-flash'
-    return fallback === primary ? [primary] : [primary, fallback]
+    const primary = Deno.env.get('GEMINI_DEEP_MODEL') || Deno.env.get('GEMINI_MODEL') || 'gemini-3.8-flash'
+    const fallback = Deno.env.get('GEMINI_DEEP_FALLBACK_MODEL') || Deno.env.get('GEMINI_FALLBACK_MODEL') || 'gemini-3.7-flash'
+    // A third model, because capacity trouble tends to hit the newest two
+    // together; the notes must still arrive.
+    const last = Deno.env.get('GEMINI_DEEP_LAST_MODEL') || 'gemini-3.6-flash'
+    return [...new Set([primary, fallback, last])]
   }
 
-  const primary = Deno.env.get('GEMINI_REALTIME_MODEL') || 'gemini-3.6-flash'
-  const fallback = Deno.env.get('GEMINI_REALTIME_FALLBACK_MODEL') || 'gemini-3.5-flash'
+  const primary = Deno.env.get('GEMINI_REALTIME_MODEL') || 'gemini-3.8-flash'
+  const fallback = Deno.env.get('GEMINI_REALTIME_FALLBACK_MODEL') || 'gemini-3.6-flash'
   return fallback === primary ? [primary] : [primary, fallback]
 }
 
 export function geminiThinkingConfig(profile: AiProfile) {
-  // Deep work (the after-class notes) runs in the background with nobody
-  // waiting on it, so it gets the model's full attention; realtime work is
-  // answered while a class watches, and stays quick.
-  return { thinkingLevel: profile === 'deep' ? 'HIGH' : 'LOW' }
+  // Medium for the after-class notes: high thinking on the newest Flash was
+  // refused as "high demand" for an entire evening, and medium notes that
+  // arrive beat thorough notes that do not. Low for anything a class waits on.
+  return { thinkingLevel: profile === 'deep' ? 'MEDIUM' : 'LOW' }
 }
 
 export async function requestGemini(
@@ -52,37 +55,53 @@ export async function requestGemini(
   if (!apiKey) throw new Error('GEMINI_API_KEY is not configured.')
 
   const models = geminiModels(profile)
-  const primaryTimeoutMs = options.primaryTimeoutMs ?? (profile === 'deep' ? 90_000 : 12_000)
-  const fallbackTimeoutMs = options.fallbackTimeoutMs ?? (profile === 'deep' ? 60_000 : 18_000)
+  // Deep work runs in the background (EdgeRuntime.waitUntil), where the
+  // runtime allows several minutes; realtime work answers a waiting class.
+  const primaryTimeoutMs = options.primaryTimeoutMs ?? (profile === 'deep' ? 150_000 : 12_000)
+  const fallbackTimeoutMs = options.fallbackTimeoutMs ?? (profile === 'deep' ? 90_000 : 18_000)
   let failureMessage = 'AI request failed.'
 
-  for (const [index, model] of models.entries()) {
-    try {
-      const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
-        method: 'POST',
-        headers: {
-          'x-goog-api-key': apiKey,
-          'Content-Type': 'application/json',
-        },
-        body,
-        signal: AbortSignal.timeout(index === 0 ? primaryTimeoutMs : fallbackTimeoutMs),
-      })
-      if (response.ok) return response
+  // A "high demand" 503 from Gemini usually clears in a few seconds. Each
+  // model gets a second try after a short pause before we move to the
+  // fallback, and deep work — after-class notes, with nobody waiting — gets
+  // one more pass over the whole chain. A wrong model name (404) or a bad
+  // request is not retried.
+  const attemptsPerModel = 2
+  const passes = 1
+  for (let pass = 0; pass < passes; pass += 1) {
+    for (const [index, model] of models.entries()) {
+      for (let attempt = 0; attempt < attemptsPerModel; attempt += 1) {
+        if (attempt > 0 || pass > 0) await new Promise((resolve) => setTimeout(resolve, attempt > 0 ? 2500 : 6000))
+        try {
+          const response = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent`, {
+            method: 'POST',
+            headers: {
+              'x-goog-api-key': apiKey,
+              'Content-Type': 'application/json',
+            },
+            body,
+            signal: AbortSignal.timeout(index === 0 ? primaryTimeoutMs : fallbackTimeoutMs),
+          })
+          if (response.ok) return response
 
-      failureMessage = (await response.text()).slice(0, 1000) || `AI request failed with status ${response.status}.`
-      if (!retryableStatus(response.status)) {
-        const nonRetryableError = new Error(failureMessage)
-        nonRetryableError.name = 'NonRetryableGeminiError'
-        throw nonRetryableError
+          failureMessage = (await response.text()).slice(0, 1000) || `AI request failed with status ${response.status}.`
+          if (!retryableStatus(response.status)) {
+            const nonRetryableError = new Error(failureMessage)
+            nonRetryableError.name = 'NonRetryableGeminiError'
+            throw nonRetryableError
+          }
+          console.warn(`Gemini ${response.status} on ${model} (attempt ${attempt + 1}, pass ${pass + 1}).`)
+        } catch (error) {
+          if (error instanceof Error && error.name === 'NonRetryableGeminiError') throw error
+          failureMessage = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
+            ? `AI request timed out on ${model}.`
+            : error instanceof Error ? error.message : 'AI request failed.'
+          // A timeout already spent the budget; do not double it.
+          if (error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')) break
+        }
       }
-    } catch (error) {
-      if (error instanceof Error && error.name === 'NonRetryableGeminiError') throw error
-      failureMessage = error instanceof Error && (error.name === 'TimeoutError' || error.name === 'AbortError')
-        ? `AI request timed out on ${model}.`
-        : error instanceof Error ? error.message : 'AI request failed.'
+      if (index < models.length - 1) console.warn(`Gemini unavailable on ${model}; switching to ${models[index + 1]}.`)
     }
-
-    if (index < models.length - 1) console.warn(`Gemini unavailable on ${model}; switching to ${models[index + 1]}.`)
   }
 
   throw new Error(failureMessage)

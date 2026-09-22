@@ -117,7 +117,7 @@ export function SessionReportPage() {
     })
   }, [sessionId])
 
-  const generateReport = useCallback(async () => {
+  const generateReport = useCallback(async (force = false) => {
     setLoading(true)
     setError('')
     try {
@@ -125,10 +125,25 @@ export function SessionReportPage() {
       if (!presenterToken) throw new Error('找不到這個場次的講者權限，無法產生課堂報告。')
 
       const supabase = requireSupabase()
-      const { data, error: functionError } = await supabase.functions.invoke('analyze-session', {
-        body: { sessionId, presenterToken },
-      })
-      if (functionError) throw new Error(await edgeFunctionMessage(functionError))
+      // The server answers "pending" at once and finishes in the background;
+      // ask again every few seconds until the notes are there.
+      const deadline = Date.now() + 9 * 60_000
+      let data: { analysis?: unknown; metrics?: unknown; status?: string; message?: string } | null = null
+      let first = true
+      while (Date.now() < deadline) {
+        const { data: reply, error: functionError } = await supabase.functions.invoke('analyze-session', {
+          body: { sessionId, presenterToken, background: true, ...(first && force ? { force: true } : {}) },
+        })
+        first = false
+        if (functionError) throw new Error(await edgeFunctionMessage(functionError))
+        if (reply?.status === 'pending') {
+          await new Promise((resolve) => window.setTimeout(resolve, 5000))
+          continue
+        }
+        data = reply
+        break
+      }
+      if (!data) throw new Error('AI 分析花的時間比預期久，請稍後再按「重新分析」。')
       if (!data?.analysis || !data?.metrics) throw new Error(data?.message || 'AI 沒有回傳完整課堂分析。')
 
       setAnalysis(data.analysis as SessionAnalysis)
@@ -227,7 +242,7 @@ export function SessionReportPage() {
         <p className="error">{error}</p>
         <div className="report-actions">
           {generateRequested && (
-            <button type="button" onClick={generateReport}><RefreshCw size={17} />重新分析</button>
+            <button type="button" onClick={() => void generateReport(true)}><RefreshCw size={17} />重新分析</button>
           )}
           <button className="ghost-button" type="button" onClick={() => void returnToSessionManager()}>
             <ArrowLeft size={17} />返回場次管理

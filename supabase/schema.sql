@@ -125,7 +125,7 @@ create table if not exists public.ai_summaries (
   type text not null check (type in ('screen_preview', 'short_answer_summary', 'question_analysis', 'exit_ticket_summary')),
   input_json jsonb not null default '{}'::jsonb,
   output_json jsonb not null default '{}'::jsonb,
-  status text not null check (status in ('success', 'failed')),
+  status text not null check (status in ('success', 'failed', 'pending')),
   created_at timestamptz not null default now()
 );
 
