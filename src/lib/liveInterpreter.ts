@@ -331,7 +331,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   const playSamples = (samples: Float32Array) => {
     if (!samples.length || stopped) return
     const buffer = outCtx.createBuffer(1, samples.length, SAMPLE_RATE)
-    buffer.copyToChannel(samples, 0)
+    buffer.getChannelData(0).set(samples)
     schedule(buffer)
   }
   const flushSentence = () => {
