@@ -1,5 +1,8 @@
 import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashPresenterToken } from '../_shared/supabase.ts'
+import { ensureSpokenCaption, languagesToWarm } from '../_shared/tts.ts'
+
+declare const EdgeRuntime: { waitUntil(promise: Promise<unknown>): void }
 
 const MAX_AUDIO_BYTES = 2_000_000
 const MAX_CAPTION_CHARACTERS = 500
@@ -148,6 +151,24 @@ Deno.serve(async (req) => {
       .select('*')
       .single()
     if (insertError) throw insertError
+
+    // Speak it now, not when the first listener asks: by the time a phone
+    // requests this line's audio the file is usually already in the bucket,
+    // which is the difference between hearing a sentence and hearing the one
+    // after it. Only the languages the presenter did not speak.
+    try {
+      EdgeRuntime.waitUntil(
+        Promise.all(
+          languagesToWarm(caption).map((lang) =>
+            ensureSpokenCaption(supabase, apiKey, caption, lang).catch((error) => {
+              console.error('tts warm failed', lang, error instanceof Error ? error.message : error)
+            }),
+          ),
+        ),
+      )
+    } catch {
+      // No background runtime here (local dev); listeners synthesise on demand.
+    }
 
     return jsonResponse({ caption })
   } catch (error) {

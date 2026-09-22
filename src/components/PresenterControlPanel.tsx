@@ -1,3 +1,4 @@
+import type { CaptionStatus } from '../lib/liveCaptions'
 import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, MessageSquare, MonitorUp, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
 import type { Session } from '../types'
 
@@ -29,6 +30,7 @@ type Props = {
   busy: boolean
   buzzerActive: boolean
   captionsEnabled: boolean
+  captionStatus: CaptionStatus
   captionDisplay: CaptionDisplay
   onChangeCaptionDisplay: (display: CaptionDisplay) => void
   captionSize: CaptionSize
@@ -56,6 +58,7 @@ export function PresenterControlPanel({
   busy,
   buzzerActive,
   captionsEnabled,
+  captionStatus,
   captionDisplay,
   onChangeCaptionDisplay,
   captionSize,
@@ -145,6 +148,17 @@ export function PresenterControlPanel({
             <b>{captionsEnabled ? '開啟' : '關閉'}</b>
           </button>
         </div>
+        {(captionsEnabled || captionStatus.state === 'error') && (
+          <p className={`caption-status caption-status-${captionStatus.state}`} role="status">
+            <span className="caption-status-dot" aria-hidden="true" />
+            {captionStatus.state === 'connecting' && '字幕連線中…'}
+            {captionStatus.state === 'live' && '字幕直播中'}
+            {captionStatus.state === 'reconnecting' && `字幕重新連線中（第 ${captionStatus.attempt} 次）…`}
+            {captionStatus.state === 'silent' && '沒有收到麥克風聲音 — 請檢查麥克風是否靜音或選錯裝置'}
+            {captionStatus.state === 'error' && `字幕發生問題：${captionStatus.message}`}
+            {captionStatus.state === 'off' && '字幕已關閉'}
+          </p>
+        )}
         {captionsEnabled && (
           <>
             <div className="caption-display-row" role="radiogroup" aria-label="字幕顯示語言">

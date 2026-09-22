@@ -6,14 +6,23 @@ function transcribeModel() {
 }
 
 function turnDetection() {
-  // Semantic VAD segments on sentence meaning instead of pure silence, which
-  // produces better-shaped captions from continuous speakers. Overridable in
-  // case the account or model rejects it.
-  const type = Deno.env.get('OPENAI_TURN_DETECTION') || 'semantic_vad'
-  const eagerness = Deno.env.get('OPENAI_VAD_EAGERNESS') || 'high'
-  return type === 'server_vad'
-    ? { type: 'server_vad', silence_duration_ms: 600 }
-    : { type: 'semantic_vad', eagerness }
+  // Server VAD, tuned short. Semantic VAD (the previous default) waits for
+  // the sentence to feel finished, which for a lecturer who never quite
+  // pauses meant one caption per paragraph, a minute late. A half-second of
+  // silence is a phrase boundary; that is what a caption should be. Still
+  // overridable per environment.
+  const type = Deno.env.get('OPENAI_TURN_DETECTION') || 'server_vad'
+  if (type === 'semantic_vad') {
+    return { type: 'semantic_vad', eagerness: Deno.env.get('OPENAI_VAD_EAGERNESS') || 'high' }
+  }
+  const silence = Number(Deno.env.get('OPENAI_VAD_SILENCE_MS') || 500)
+  const threshold = Number(Deno.env.get('OPENAI_VAD_THRESHOLD') || 0.5)
+  return {
+    type: 'server_vad',
+    threshold: Number.isFinite(threshold) ? threshold : 0.5,
+    prefix_padding_ms: 300,
+    silence_duration_ms: Number.isFinite(silence) ? silence : 500,
+  }
 }
 
 // Mints a short-lived OpenAI Realtime transcription token so the presenter

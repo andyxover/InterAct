@@ -20,7 +20,7 @@ const messages = {
     imageAlt: '講者派送圖片', congratulations: '恭喜！',
     winnerIs: '得獎的是', canBuzz: '現在可以搶答', waitPresenter: '請等待主講者開始', submitting: '送出中', buzz: '搶答', preparing: '準備中',
     sessionGoneTitle: '這場次已經莎喲娜啦了！', sessionGoneMessage: '下回請早！',
-    interpretation: '即時口譯', interpretationHint: '開啟後，講者說外語時會用語音唸出翻譯（建議戴耳機）',
+    interpretation: '即時口譯', interpretationHint: '開啟後，講者說外語時會用語音唸出翻譯（建議戴耳機）', interpretationBlocked: '點一下恢復語音',
     transcriptTitle: '逐字稿', transcriptEmpty: '講者開啟字幕後，逐字稿會顯示在這裡。', closeLabel: '關閉',
   },
   en: {
@@ -42,7 +42,7 @@ const messages = {
     imageAlt: 'Image shared by presenter', congratulations: 'Congratulations!',
     winnerIs: 'The winner is', canBuzz: 'Buzz in now', waitPresenter: 'Wait for the presenter to start', submitting: 'Sending', buzz: 'Buzz', preparing: 'Get ready',
     sessionGoneTitle: 'This session has said its sayonara!', sessionGoneMessage: 'Catch the next one bright and early!',
-    interpretation: 'Live interpreter', interpretationHint: 'Speaks a translated voice-over when the presenter uses another language (headphones recommended)',
+    interpretation: 'Live interpreter', interpretationHint: 'Speaks a translated voice-over when the presenter uses another language (headphones recommended)', interpretationBlocked: 'Tap to resume audio',
     transcriptTitle: 'Transcript', transcriptEmpty: 'The live transcript appears here once the presenter turns on captions.', closeLabel: 'Close',
   },
 } as const

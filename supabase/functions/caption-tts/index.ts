@@ -1,38 +1,11 @@
 import { corsHeaders, jsonResponse } from '../_shared/ai.ts'
 import { getAdminClient, hashParticipantToken } from '../_shared/supabase.ts'
+import { ensureSpokenCaption } from '../_shared/tts.ts'
 
-const BUCKET = 'interact-caption-audio'
 const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i
 
 function validUuid(value: unknown) {
   return typeof value === 'string' && uuidPattern.test(value)
-}
-
-function ttsModel() {
-  return Deno.env.get('OPENAI_TTS_MODEL') || 'gpt-4o-mini-tts'
-}
-
-function ttsVoice() {
-  return Deno.env.get('OPENAI_TTS_VOICE') || 'alloy'
-}
-
-async function synthesize(apiKey: string, text: string) {
-  const response = await fetch('https://api.openai.com/v1/audio/speech', {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${apiKey}`,
-      'Content-Type': 'application/json',
-    },
-    body: JSON.stringify({
-      model: ttsModel(),
-      voice: ttsVoice(),
-      input: text,
-      response_format: 'mp3',
-    }),
-    signal: AbortSignal.timeout(30_000),
-  })
-  if (!response.ok) throw new Error(`TTS failed (${response.status}): ${(await response.text()).slice(0, 300)}`)
-  return new Uint8Array(await response.arrayBuffer())
 }
 
 Deno.serve(async (req) => {
@@ -72,29 +45,11 @@ Deno.serve(async (req) => {
       .single()
     if (!caption) return jsonResponse({ message: '找不到這句字幕。' }, 404)
 
-    const text = lang === 'en'
-      ? caption.text_en || (caption.original_lang === 'en' ? caption.original : '')
-      : caption.text_zh || (caption.original_lang === 'zh' ? caption.original : '')
-    if (!text) return jsonResponse({ message: '這句字幕沒有可口譯的內容。' }, 422)
-
-    const path = `${sessionId}/${captionId}-${lang}.mp3`
-    const { data: publicUrlData } = supabase.storage.from(BUCKET).getPublicUrl(path)
-    const publicUrl = publicUrlData.publicUrl
-
-    // Serve the cached synthesis when a classmate already requested this line.
-    const existing = await fetch(publicUrl, { method: 'HEAD' }).catch(() => null)
-    if (existing?.ok) return jsonResponse({ url: publicUrl, cached: true })
-
-    const audio = await synthesize(apiKey, text)
-
-    // Bucket is created lazily so deployments need no extra setup step.
-    await supabase.storage.createBucket(BUCKET, { public: true }).catch(() => null)
-    const { error: uploadError } = await supabase.storage
-      .from(BUCKET)
-      .upload(path, audio, { contentType: 'audio/mpeg', upsert: true })
-    if (uploadError) throw uploadError
-
-    return jsonResponse({ url: publicUrl, cached: false })
+    // Usually already there: live-caption warms the audio when the caption is
+    // stored, so this is a lookup, not a wait.
+    const spoken = await ensureSpokenCaption(supabase, apiKey, caption, lang)
+    if (!spoken) return jsonResponse({ message: '這句字幕沒有可口譯的內容。' }, 422)
+    return jsonResponse(spoken)
   } catch (error) {
     console.error('caption-tts failed', error instanceof Error ? error.message : error)
     return jsonResponse({ message: '口譯語音產生失敗。' }, 500)

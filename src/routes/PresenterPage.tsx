@@ -16,6 +16,7 @@ import { SetupNotice } from '../components/SetupNotice'
 import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
 import { startCaptionRecorder } from '../lib/liveCaptions'
+import type { CaptionStatus } from '../lib/liveCaptions'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -72,6 +73,9 @@ export function PresenterPage() {
   const selectionRectRef = useRef<{ x: number; y: number; width: number; height: number } | null>(null)
   const [busy, setBusy] = useState(false)
   const [captionsOn, setCaptionsOn] = useState(false)
+  // What the caption pipeline is doing right now, shown beside the toggle so
+  // a teacher can tell "connecting" from "broken" from "your mic is muted".
+  const [captionStatus, setCaptionStatus] = useState<CaptionStatus>({ state: 'off' })
   const [captionDisplay, setCaptionDisplay] = useState<CaptionDisplay>(() => {
     const stored = localStorage.getItem('interact_caption_display')
     return stored === 'zh' || stored === 'en' ? stored : 'both'
@@ -128,11 +132,12 @@ export function PresenterPage() {
           sessionId,
           presenterToken,
           vocabulary: localStorage.getItem('interact_caption_vocab') || '',
-          onError: (message) => setAnalysisError(`即時字幕：${message}`),
+          onError: (message) => setCaptionStatus({ state: 'error', message }),
+          onStatus: setCaptionStatus,
         })
         if (cancelled) stopRecorder()
       } catch (error) {
-        setAnalysisError(error instanceof Error ? error.message : '無法開啟即時字幕。')
+        setCaptionStatus({ state: 'error', message: error instanceof Error ? error.message : '無法開啟即時字幕。' })
         setCaptionsOn(false)
       }
     }
@@ -141,6 +146,7 @@ export function PresenterPage() {
     return () => {
       cancelled = true
       stopRecorder?.()
+      setCaptionStatus((current) => (current.state === 'error' ? current : { state: 'off' }))
     }
   }, [captionsOn, sessionId])
 
@@ -944,6 +950,7 @@ export function PresenterPage() {
           onStartBuzzer={startBuzzer}
           onStopQuestion={stopQuestion}
           captionsEnabled={captionsOn}
+          captionStatus={captionStatus}
           captionDisplay={captionDisplay}
           onChangeCaptionDisplay={changeCaptionDisplay}
           captionSize={captionSize}

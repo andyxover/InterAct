@@ -3829,3 +3829,41 @@ h2 {
   border-radius: 10px;
   font-size: 12px;
 }
+
+/* Caption pipeline status beside the presenter's toggle. */
+.caption-status {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin: 8px 0 0;
+  font-size: 12.5px;
+  color: var(--muted, #6b7280);
+  line-height: 1.4;
+}
+.caption-status-dot {
+  flex: none;
+  width: 8px;
+  height: 8px;
+  border-radius: 999px;
+  background: #9ca3af;
+}
+.caption-status-live .caption-status-dot { background: #16a34a; box-shadow: 0 0 0 3px rgba(22, 163, 74, 0.18); }
+.caption-status-connecting .caption-status-dot,
+.caption-status-reconnecting .caption-status-dot { background: #f59e0b; animation: caption-status-pulse 1s ease-in-out infinite; }
+.caption-status-silent { color: #b45309; }
+.caption-status-silent .caption-status-dot { background: #f59e0b; }
+.caption-status-error { color: #b91c1c; }
+.caption-status-error .caption-status-dot { background: #dc2626; }
+@keyframes caption-status-pulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.35; } }
+
+/* Interpreter button: blocked audio asks for a tap; speaking shows a pulse. */
+.interpretation-toggle.is-blocked {
+  background: #b45309;
+  border-color: #b45309;
+  color: #fff;
+  animation: caption-status-pulse 1.2s ease-in-out infinite;
+}
+.interpretation-toggle.is-speaking svg { animation: caption-status-pulse 0.9s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .caption-status-dot, .interpretation-toggle.is-blocked, .interpretation-toggle.is-speaking svg { animation: none; }
+}

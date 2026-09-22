@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from 'react'
 import { finalTextFor, partialTextFor } from '../lib/captionText'
 import type { CaptionPartial } from '../lib/captionText'
-import { subscribeLivePartials } from '../lib/livePartials'
-import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
+import { subscribeLiveFinals, subscribeLivePartials } from '../lib/liveChannel'
+import { isSupabaseConfigured } from '../lib/supabase'
 import type { Caption } from '../types'
 
 const CAPTION_VISIBLE_MS = 12_000
@@ -66,19 +66,15 @@ export function CaptionBar({ sessionId, mode }: Props) {
 
   useEffect(() => {
     if (!isSupabaseConfigured || !sessionId) return
-    const supabase = requireSupabase()
-    const channel = supabase
-      .channel(`captions:${sessionId}:${mode}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'captions', filter: `session_id=eq.${sessionId}` }, (payload) => {
-        setCaption(payload.new as Caption)
-        // The finalized caption supersedes the lingering partial of the same
-        // sentence (the presenter no longer clears it, to avoid a blank gap).
-        setPartial(EMPTY_PARTIAL)
-        window.clearTimeout(partialTimerRef.current)
-        window.clearTimeout(hideTimerRef.current)
-        hideTimerRef.current = window.setTimeout(() => setCaption(null), CAPTION_VISIBLE_MS)
-      })
-      .subscribe()
+    const unsubscribeFinals = subscribeLiveFinals(sessionId, (next) => {
+      setCaption(next)
+      // The finalized caption supersedes the lingering partial of the same
+      // sentence (the presenter no longer clears it, to avoid a blank gap).
+      setPartial(EMPTY_PARTIAL)
+      window.clearTimeout(partialTimerRef.current)
+      window.clearTimeout(hideTimerRef.current)
+      hideTimerRef.current = window.setTimeout(() => setCaption(null), CAPTION_VISIBLE_MS)
+    })
 
     const unsubscribePartials = subscribeLivePartials(sessionId, (next) => {
       setPartial(next)
@@ -89,7 +85,7 @@ export function CaptionBar({ sessionId, mode }: Props) {
     return () => {
       window.clearTimeout(hideTimerRef.current)
       window.clearTimeout(partialTimerRef.current)
-      supabase.removeChannel(channel)
+      unsubscribeFinals()
       unsubscribePartials()
     }
   }, [mode, sessionId])

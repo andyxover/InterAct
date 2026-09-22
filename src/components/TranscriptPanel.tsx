@@ -2,7 +2,7 @@ import { ScrollText, X } from 'lucide-react'
 import { useEffect, useRef, useState } from 'react'
 import { finalTextFor, partialTextFor } from '../lib/captionText'
 import type { CaptionPartial } from '../lib/captionText'
-import { subscribeLivePartials } from '../lib/livePartials'
+import { subscribeLiveFinals, subscribeLivePartials } from '../lib/liveChannel'
 import { participantText } from '../lib/participantI18n'
 import type { ParticipantLocale } from '../lib/participantI18n'
 import { isSupabaseConfigured, requireSupabase } from '../lib/supabase'
@@ -61,21 +61,17 @@ export function TranscriptPanel({ sessionId, locale }: Props) {
         if (!cancelled && data) setCaptions([...(data as Caption[])].reverse())
       })
 
-    const channel = supabase
-      .channel(`transcript:${sessionId}`)
-      .on('postgres_changes', { event: 'INSERT', schema: 'public', table: 'captions', filter: `session_id=eq.${sessionId}` }, (payload) => {
-        const next = payload.new as Caption
-        setCaptions((current) => (current.some((item) => item.id === next.id) ? current : [...current.slice(-HISTORY_LIMIT + 1), next]))
-        // The finalized line replaces the in-progress partial of that sentence.
-        setPartial(EMPTY_PARTIAL)
-      })
-      .subscribe()
+    const unsubscribeFinals = subscribeLiveFinals(sessionId, (next) => {
+      setCaptions((current) => (current.some((item) => item.id === next.id) ? current : [...current.slice(-HISTORY_LIMIT + 1), next]))
+      // The finalized line replaces the in-progress partial of that sentence.
+      setPartial(EMPTY_PARTIAL)
+    })
 
     const unsubscribePartials = subscribeLivePartials(sessionId, setPartial)
 
     return () => {
       cancelled = true
-      supabase.removeChannel(channel)
+      unsubscribeFinals()
       unsubscribePartials()
     }
   }, [open, sessionId])
