@@ -37,7 +37,10 @@ export function geminiModels(profile: AiProfile) {
 }
 
 export function geminiThinkingConfig(profile: AiProfile) {
-  return { thinkingLevel: profile === 'deep' ? 'MEDIUM' : 'LOW' }
+  // Deep work (the after-class notes) runs in the background with nobody
+  // waiting on it, so it gets the model's full attention; realtime work is
+  // answered while a class watches, and stays quick.
+  return { thinkingLevel: profile === 'deep' ? 'HIGH' : 'LOW' }
 }
 
 export async function requestGemini(
