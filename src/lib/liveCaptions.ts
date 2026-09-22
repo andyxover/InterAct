@@ -37,13 +37,21 @@ export type CaptionStatus =
   | { state: 'error'; message: string }
   | { state: 'off' }
 
+export type CaptionActivity = 'hearing' | 'transcribing' | 'translating'
+
 type CaptionRecorderOptions = {
   sessionId: string
   presenterToken: string
   vocabulary?: string
   onError: (message: string) => void
   onStatus?: (status: CaptionStatus) => void
+  /** Microphone level, 0–1, a few times a second. */
+  onLevel?: (level: number) => void
+  /** Something just happened in the pipeline. */
+  onActivity?: (activity: CaptionActivity) => void
 }
+const LEVEL_MS = 80
+const LEVEL_FULL_RMS = 0.12
 
 type PartialTranslation = { lang: string | null; zh: string | null; en: string | null }
 
@@ -100,7 +108,7 @@ async function mintStreamToken(sessionId: string, presenterToken: string, vocabu
 // session's shared broadcast channel; each finished sentence is stored and
 // translated through the live-caption edge function, and the stored row is
 // broadcast to viewers straight away.
-export async function startCaptionRecorder({ sessionId, presenterToken, vocabulary = '', onError, onStatus }: CaptionRecorderOptions) {
+export async function startCaptionRecorder({ sessionId, presenterToken, vocabulary = '', onError, onStatus, onLevel, onActivity }: CaptionRecorderOptions) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟即時字幕。')
 
   const supabase = requireSupabase()
@@ -148,6 +156,7 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
     if (translateInFlight || partialText.length < PARTIAL_TRANSLATE_MIN_CHARS || now - lastTranslateAt < PARTIAL_TRANSLATE_MS) return
     translateInFlight = true
     lastTranslateAt = now
+    onActivity?.('translating')
     const requestedFor = partialText
     void supabase.functions
       .invoke('live-caption', { body: { sessionId, presenterToken, transcript: requestedFor, translateOnly: true } })
@@ -302,6 +311,7 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
           }
           partialText += data.delta
           partialByItem.set(itemId, partialText)
+          onActivity?.('transcribing')
           sendPartial(trimOverlap(toTraditional(partialText)))
           translatePartial()
           closeLongSegment()
@@ -345,12 +355,19 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
   const processor = audioContext.createScriptProcessor(4096, 1, 1)
   let lastLoudAt = Date.now()
   let silentWarned = false
+  let lastLevelAt = 0
   processor.onaudioprocess = (event) => {
     if (stopped) return
     const input = event.inputBuffer.getChannelData(0)
     const now = Date.now()
-    if (rms(input) > SILENCE_RMS) {
+    const energy = rms(input)
+    if (onLevel && now - lastLevelAt >= LEVEL_MS) {
+      lastLevelAt = now
+      onLevel(Math.min(1, energy / LEVEL_FULL_RMS))
+    }
+    if (energy > SILENCE_RMS) {
       lastLoudAt = now
+      if (live) onActivity?.('hearing')
       if (silentWarned && live) {
         silentWarned = false
         setStatus({ state: 'live' })

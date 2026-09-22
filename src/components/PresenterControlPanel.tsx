@@ -1,7 +1,30 @@
 import type { CaptionStatus } from '../lib/liveCaptions'
 import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, Headphones, MessageSquare, MonitorUp, RefreshCw, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
-import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
+import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
 import type { Session } from '../types'
+import { MicMeter } from './MicMeter'
+import type { MeterActivity } from './MicMeter'
+
+/** Voices the fixed-voice interpreter can read in, with a word on each. */
+export const STEADY_VOICES: Array<{ value: string; label: string }> = [
+  { value: 'marin', label: 'Marin · 沉穩女聲' },
+  { value: 'cedar', label: 'Cedar · 沉穩男聲' },
+  { value: 'coral', label: 'Coral · 親切女聲' },
+  { value: 'sage', label: 'Sage · 平和女聲' },
+  { value: 'alloy', label: 'Alloy · 中性' },
+  { value: 'echo', label: 'Echo · 清亮男聲' },
+  { value: 'onyx', label: 'Onyx · 低沉男聲' },
+  { value: 'nova', label: 'Nova · 明亮女聲' },
+  { value: 'shimmer', label: 'Shimmer · 柔和女聲' },
+]
+
+/** Ready-made manners; the presenter can also write their own. */
+export const TONE_PRESETS: Array<{ label: string; text: string }> = [
+  { label: '平穩清楚', text: 'A calm, steady classroom interpreter: even pace, clear diction, unhurried, the same manner for every sentence.' },
+  { label: '親切溫和', text: 'Warm and friendly, like a patient teacher explaining to a small class; gentle, encouraging, never rushed.' },
+  { label: '有精神', text: 'Bright and energetic, upbeat and engaging, keeping the class awake without shouting; consistent from sentence to sentence.' },
+  { label: '新聞播報', text: 'A neutral newsreader: measured, professional, evenly paced, no emotion beyond the words themselves.' },
+]
 
 export type CaptionDisplay = 'zh' | 'en' | 'both'
 export type CaptionSize = 'sm' | 'md' | 'lg'
@@ -44,6 +67,17 @@ type Props = {
   onRefreshInterpreterOutputs: () => void
   interpreterText: string
   onToggleInterpreter: () => void
+  interpreterVoice: InterpreterVoice
+  onChangeInterpreterVoice: (voice: InterpreterVoice) => void
+  steadyVoice: string
+  onChangeSteadyVoice: (voice: string) => void
+  interpreterTone: string
+  onChangeInterpreterTone: (tone: string) => void
+  /** Microphone level and the pipeline's latest step, for the meters. */
+  captionLevel: number
+  captionActivity: { kind: MeterActivity; at: number } | null
+  interpreterLevel: number
+  interpreterActivity: { kind: MeterActivity; at: number } | null
   captionDisplay: CaptionDisplay
   onChangeCaptionDisplay: (display: CaptionDisplay) => void
   captionSize: CaptionSize
@@ -84,6 +118,16 @@ export function PresenterControlPanel({
   onRefreshInterpreterOutputs,
   interpreterText,
   onToggleInterpreter,
+  interpreterVoice,
+  onChangeInterpreterVoice,
+  steadyVoice,
+  onChangeSteadyVoice,
+  interpreterTone,
+  onChangeInterpreterTone,
+  captionLevel,
+  captionActivity,
+  interpreterLevel,
+  interpreterActivity,
   captionDisplay,
   onChangeCaptionDisplay,
   captionSize,
@@ -202,6 +246,7 @@ export function PresenterControlPanel({
         )}
         {interpreterEnabled && (
           <>
+            <MicMeter level={interpreterLevel} activity={interpreterActivity} stages={['hearing', 'translating', 'speaking']} />
             <div className="caption-display-row" role="radiogroup" aria-label="口譯語言">
               <span className="caption-display-label">翻成</span>
               {([['en', '英文'], ['zh', '中文']] as Array<[InterpreterLanguage, string]>).map(([value, label]) => (
@@ -259,6 +304,58 @@ export function PresenterControlPanel({
               不要選教室喇叭：麥克風會把口譯聲音收回去再翻一次。
             </p>
             )}
+            <div className="caption-display-row" role="radiogroup" aria-label="口譯聲音">
+              <span className="caption-display-label">聲音</span>
+              {([['adaptive', '跟隨講者'], ['steady', '固定聲音']] as Array<[InterpreterVoice, string]>).map(([value, label]) => (
+                <button
+                  key={value}
+                  aria-checked={interpreterVoice === value}
+                  className={`caption-display-option${interpreterVoice === value ? ' is-active' : ''}`}
+                  role="radio"
+                  type="button"
+                  onClick={() => onChangeInterpreterVoice(value)}
+                >
+                  {label}
+                </button>
+              ))}
+            </div>
+            {interpreterVoice === 'adaptive' ? (
+              <p className="caption-hint">跟隨講者：模型會照你每一句的語氣、音高說話，最快，但語氣會隨你的講法起伏。想要始終如一的聲音，選「固定聲音」。</p>
+            ) : (
+              <>
+                <label className="caption-vocab-row">
+                  <span className="caption-display-label">用誰的聲音</span>
+                  <select className="caption-vocab-input" value={steadyVoice} onChange={(event) => onChangeSteadyVoice(event.target.value)}>
+                    {STEADY_VOICES.map((voice) => <option key={voice.value} value={voice.value}>{voice.label}</option>)}
+                  </select>
+                </label>
+                <div className="voice-tone-row">
+                  <span className="caption-display-label">語氣</span>
+                  <div className="voice-tone-presets" role="group" aria-label="語氣範本">
+                    {TONE_PRESETS.map((preset) => (
+                      <button
+                        key={preset.label}
+                        aria-pressed={interpreterTone === preset.text}
+                        className={`caption-display-option${interpreterTone === preset.text ? ' is-active' : ''}`}
+                        type="button"
+                        onClick={() => onChangeInterpreterTone(preset.text)}
+                      >
+                        {preset.label}
+                      </button>
+                    ))}
+                  </div>
+                  <textarea
+                    aria-label="口譯語氣（可自行描述）"
+                    className="voice-tone-input"
+                    maxLength={400}
+                    placeholder="也可以自己寫：例如「像廣播主持人，親切、慢一點、每句都一樣穩」。改了會在下一句生效。"
+                    value={interpreterTone}
+                    onChange={(event) => onChangeInterpreterTone(event.target.value)}
+                  />
+                </div>
+                <p className="caption-hint">固定聲音：把模型翻好的文字交給同一個語音朗讀，語氣不會跳。比跟隨講者慢約一秒。</p>
+              </>
+            )}
             {interpreterText && <p className="interp-text" aria-live="polite">{interpreterText}</p>}
           </>
         )}
@@ -275,6 +372,7 @@ export function PresenterControlPanel({
         )}
         {captionsEnabled && (
           <>
+            <MicMeter level={captionLevel} activity={captionActivity} stages={['hearing', 'transcribing', 'translating']} />
             <div className="caption-display-row" role="radiogroup" aria-label="字幕顯示語言">
               <span className="caption-display-label">字幕語言</span>
               {CAPTION_DISPLAY_OPTIONS.map((option) => (

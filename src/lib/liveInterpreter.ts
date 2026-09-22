@@ -21,6 +21,21 @@ import { requireSupabase } from './supabase'
 
 export type InterpreterLanguage = 'en' | 'zh'
 export type InterpreterOutput = 'device' | 'phones' | 'both'
+/**
+ * Whose voice the class hears.
+ *   adaptive — the translation model's own: it follows the presenter's tone,
+ *              pitch and pace phrase by phrase, and cannot be told otherwise.
+ *              Fastest; sounds like a different person from sentence to
+ *              sentence when the presenter's delivery varies.
+ *   steady   — one fixed voice, in a manner the presenter wrote, reading the
+ *              model's translated text sentence by sentence. About a second
+ *              further behind, and always the same person.
+ */
+export type InterpreterVoice = 'adaptive' | 'steady'
+/** Steady voice: the manner can be set ('expressive', gpt-4o-mini-tts) or the first word comes sooner ('fast', tts-1). */
+export type SteadyModel = 'expressive' | 'fast'
+/** What the pipeline is doing right now, for a meter on the presenter's screen. */
+export type InterpreterActivity = 'hearing' | 'translating' | 'speaking'
 
 export type InterpreterStatus =
   | { state: 'off' }
@@ -39,9 +54,18 @@ type Options = {
   output: InterpreterOutput
   /** Output device id from listOutputDevices(); empty for the system default. */
   outputDeviceId?: string
+  voice?: InterpreterVoice
+  /** 'steady' only: the text-to-speech voice, and the manner it should read in. */
+  steadyVoice?: string
+  steadyModel?: SteadyModel
+  tone?: string
   onStatus?: (status: InterpreterStatus) => void
   /** The translation so far, for a line on the presenter's screen. */
   onText?: (text: string) => void
+  /** Microphone level, 0–1, a few times a second. */
+  onLevel?: (level: number) => void
+  /** Something just happened in the pipeline. */
+  onActivity?: (activity: InterpreterActivity) => void
 }
 
 const SAMPLE_RATE = 24000
@@ -54,6 +78,71 @@ const STATE_HEARTBEAT_MS = 8000
 const MAX_PEERS = 60
 const DISCONNECT_GRACE_MS = 10000
 const ICE_SERVERS = [{ urls: 'stun:stun.l.google.com:19302' }]
+// Level reports are throttled to this; a meter does not need more.
+const LEVEL_MS = 80
+// A microphone at conversational volume sits around this RMS; treated as full scale.
+const LEVEL_FULL_RMS = 0.12
+// Steady voice: a sentence is read when it ends in punctuation, when it has
+// grown to this many characters, or when nothing more has arrived for this
+// long. Short fragments wait for the rest of the phrase.
+const SENTENCE_MAX_CHARS = 160
+const SENTENCE_IDLE_MS = 900
+const SENTENCE_MIN_CHARS = 4
+const SENTENCE_END = /[.!?。！？]["'”’)]?\s*$/u
+
+const SUPABASE_URL = import.meta.env.VITE_SUPABASE_URL as string | undefined
+const SUPABASE_KEY = import.meta.env.VITE_SUPABASE_ANON_KEY as string | undefined
+
+/**
+ * One sentence, spoken in the fixed voice, as 24 kHz PCM16 arriving in
+ * chunks: `onChunk` gets each piece the moment it lands so the sentence can
+ * start playing while the rest is still being made. Resolves when the
+ * sentence is complete; rejects when nothing usable came back.
+ */
+async function speakSentence(
+  sessionId: string, presenterToken: string, text: string, lang: InterpreterLanguage, voice: string, tone: string, model: 'expressive' | 'fast',
+  onChunk: (samples: Float32Array) => void,
+) {
+  if (!SUPABASE_URL || !SUPABASE_KEY) throw new Error('Supabase 尚未設定。')
+  const res = await fetch(`${SUPABASE_URL}/functions/v1/interp-tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    body: JSON.stringify({ sessionId, presenterToken, text, lang, voice, tone, model }),
+  })
+  if (!res.ok || !res.body) {
+    const message = await res.json().then((d: { message?: string }) => d?.message).catch(() => null)
+    throw new Error(message || '口譯語音產生失敗。')
+  }
+  const reader = res.body.getReader()
+  // PCM16 is two bytes a sample; a chunk boundary can fall between them.
+  let carry: Uint8Array = new Uint8Array(0)
+  let total = 0
+  for (;;) {
+    const { value, done } = await reader.read()
+    if (done) break
+    const bytes = carry.length ? new Uint8Array([...carry, ...value]) : value
+    const usable = bytes.length - (bytes.length % 2)
+    carry = bytes.subarray(usable)
+    if (!usable) continue
+    const view = new DataView(bytes.buffer, bytes.byteOffset, usable)
+    const samples = new Float32Array(usable / 2)
+    for (let i = 0; i < samples.length; i += 1) samples[i] = view.getInt16(i * 2, true) / 0x8000
+    total += samples.length
+    onChunk(samples)
+  }
+  if (!total) throw new Error('口譯語音產生失敗。')
+}
+
+/** A no-op call that gets the speech function's instance warm before the first sentence needs it. */
+function warmSpeech() {
+  if (!SUPABASE_URL || !SUPABASE_KEY) return
+  // An empty request the function rejects at once (400) - it has run, which is the point.
+  void fetch(`${SUPABASE_URL}/functions/v1/interp-tts`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json', apikey: SUPABASE_KEY, Authorization: `Bearer ${SUPABASE_KEY}` },
+    body: '{}',
+  }).catch(() => null)
+}
 
 async function mintTranslationToken(sessionId: string, presenterToken: string, language: InterpreterLanguage) {
   const { data, error } = await requireSupabase().functions.invoke('translate-token', {
@@ -124,7 +213,7 @@ export async function listOutputDevices(): Promise<OutputDevice[]> {
 
 type SinkAudioContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> }
 
-export async function startInterpreter({ sessionId, presenterToken, language, output, outputDeviceId = '', onStatus, onText }: Options) {
+export async function startInterpreter({ sessionId, presenterToken, language, output, outputDeviceId = '', voice = 'adaptive', steadyVoice = 'marin', steadyModel = 'expressive', tone = '', onStatus, onText, onLevel, onActivity }: Options) {
   const setStatus = (status: InterpreterStatus) => onStatus?.(status)
   setStatus({ state: 'connecting' })
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟口譯。')
@@ -168,6 +257,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   let text = ''
   let lastLoudAt = Date.now()
   let silentWarned = false
+  let lastLevelAt = 0
   const peers = new Map<string, RTCPeerConnection>()
 
   const refreshStatus = () => {
@@ -179,8 +269,14 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
     if (stopped) return
     const samples = event.inputBuffer.getChannelData(0)
     const now = Date.now()
-    if (rms(samples) > SILENCE_RMS) {
+    const energy = rms(samples)
+    if (onLevel && now - lastLevelAt >= LEVEL_MS) {
+      lastLevelAt = now
+      onLevel(Math.min(1, energy / LEVEL_FULL_RMS))
+    }
+    if (energy > SILENCE_RMS) {
       lastLoudAt = now
+      if (live) onActivity?.('hearing')
       if (silentWarned && live) { silentWarned = false; refreshStatus() }
     } else if (live && !silentWarned && now - lastLoudAt > SILENCE_WARN_MS) {
       silentWarned = true
@@ -203,11 +299,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   document.addEventListener('visibilitychange', resume)
   const resumeTimer = window.setInterval(resume, 5000)
 
-  const play = (base64: string) => {
-    const samples = pcm16Base64ToFloat32(base64)
-    if (!samples.length) return
-    const buffer = outCtx.createBuffer(1, samples.length, SAMPLE_RATE)
-    buffer.copyToChannel(samples, 0)
+  const schedule = (buffer: AudioBuffer) => {
     const node = outCtx.createBufferSource()
     node.buffer = buffer
     if (toDevice) node.connect(outCtx.destination)
@@ -215,6 +307,67 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
     const startAt = Math.max(outCtx.currentTime + LEAD_S, nextPlayAt)
     node.start(startAt)
     nextPlayAt = startAt + buffer.duration
+    onActivity?.('speaking')
+  }
+
+  const play = (base64: string) => {
+    const samples = pcm16Base64ToFloat32(base64)
+    if (!samples.length) return
+    const buffer = outCtx.createBuffer(1, samples.length, SAMPLE_RATE)
+    buffer.copyToChannel(samples, 0)
+    schedule(buffer)
+  }
+
+  // --- Steady voice: the translated text, read sentence by sentence ---------
+  //
+  // Sentences are fetched as soon as they are complete, several at a time,
+  // and played strictly in order; a sentence that fails to synthesise is
+  // skipped rather than holding up the ones after it.
+  const steady = voice === 'steady'
+  if (steady) warmSpeech()
+  let sentence = ''
+  let sentenceIdle = 0
+  let playChain: Promise<void> = Promise.resolve()
+  const playSamples = (samples: Float32Array) => {
+    if (!samples.length || stopped) return
+    const buffer = outCtx.createBuffer(1, samples.length, SAMPLE_RATE)
+    buffer.copyToChannel(samples, 0)
+    schedule(buffer)
+  }
+  const flushSentence = () => {
+    window.clearTimeout(sentenceIdle)
+    sentenceIdle = 0
+    const text = sentence.trim()
+    sentence = ''
+    if (text.length < SENTENCE_MIN_CHARS || stopped) return
+    // Fetching starts now, so the audio is usually waiting by the time this
+    // sentence's turn comes; playing waits for the sentence before it.
+    const chunks: Float32Array[] = []
+    let wake: (() => void) | null = null
+    let finished = false
+    const fetched = speakSentence(sessionId, presenterToken, text, language, steadyVoice, tone, steadyModel, (samples) => {
+      chunks.push(samples)
+      wake?.()
+    }).catch(() => null).finally(() => { finished = true; wake?.() })
+    playChain = playChain.then(async () => {
+      for (;;) {
+        while (chunks.length) playSamples(chunks.shift() as Float32Array)
+        if (finished || stopped) break
+        await new Promise<void>((resolve) => { wake = resolve })
+        wake = null
+      }
+      await fetched
+    })
+  }
+  const takeTranscript = (delta: string) => {
+    sentence += delta
+    onActivity?.('translating')
+    if (SENTENCE_END.test(sentence) || sentence.length >= SENTENCE_MAX_CHARS) {
+      flushSentence()
+      return
+    }
+    window.clearTimeout(sentenceIdle)
+    sentenceIdle = window.setTimeout(flushSentence, SENTENCE_IDLE_MS)
   }
 
   // --- The translation socket ---------------------------------------------
@@ -239,10 +392,13 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
       try {
         const data = JSON.parse(String(event.data))
         if (data.type === 'session.output_audio.delta' && typeof data.delta === 'string') {
-          play(data.delta)
+          // In steady mode the model's own voice is not played; its text is.
+          if (!steady) play(data.delta)
+          else onActivity?.('translating')
         } else if (data.type === 'session.output_transcript.delta' && typeof data.delta === 'string') {
           text = (text + data.delta).slice(-KEEP_TEXT_CHARS)
           onText?.(text)
+          if (steady) takeTranscript(data.delta)
         } else if (data.type === 'error') {
           setStatus({ state: 'error', message: String(data.error?.message || '口譯串流發生錯誤。') })
         }
@@ -359,6 +515,7 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
   const heartbeat = toPhones ? window.setInterval(announce, STATE_HEARTBEAT_MS) : 0
 
   const teardown = () => {
+    window.clearTimeout(sentenceIdle)
     window.clearInterval(resumeTimer)
     window.clearInterval(heartbeat)
     document.removeEventListener('visibilitychange', resume)

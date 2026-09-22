@@ -2,7 +2,9 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import type { PointerEvent as ReactPointerEvent } from 'react'
 import { ConfirmDialog } from '../components/ConfirmDialog'
 import { PresenterControlPanel } from '../components/PresenterControlPanel'
+import { TONE_PRESETS } from '../components/PresenterControlPanel'
 import type { CaptionDisplay, CaptionSize, CaptionStyle } from '../components/PresenterControlPanel'
+import type { MeterActivity } from '../components/MicMeter'
 import { BuzzerOverlay } from '../components/BuzzerOverlay'
 import { QRCodePanel } from '../components/QRCodePanel'
 import { ExitTicketResult } from '../components/ExitTicketResult'
@@ -18,7 +20,7 @@ import { finalizeLottery } from '../lib/lottery'
 import { startCaptionRecorder } from '../lib/liveCaptions'
 import type { CaptionStatus } from '../lib/liveCaptions'
 import { listOutputDevices, startInterpreter } from '../lib/liveInterpreter'
-import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
+import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -88,6 +90,19 @@ export function PresenterPage() {
   const [interpreterOutputId, setInterpreterOutputId] = useState(() => localStorage.getItem('interact_interp_output') || '')
   const [interpreterOutputs, setInterpreterOutputs] = useState<OutputDevice[]>([])
   const [interpreterText, setInterpreterText] = useState('')
+  // Whose voice the class hears, and in what manner. Remembered on this machine.
+  const [interpreterVoice, setInterpreterVoice] = useState<InterpreterVoice>(() => (localStorage.getItem('interact_interp_voice') === 'steady' ? 'steady' : 'adaptive'))
+  const [steadyVoice, setSteadyVoice] = useState(() => localStorage.getItem('interact_interp_steady_voice') || 'marin')
+  const [interpreterTone, setInterpreterTone] = useState(() => localStorage.getItem('interact_interp_tone') ?? TONE_PRESETS[0].text)
+  // The tone is read when each sentence is spoken, so an edit takes effect on
+  // the next sentence without restarting the interpreter.
+  const interpreterToneRef = useRef(interpreterTone)
+  interpreterToneRef.current = interpreterTone
+  // The meters: microphone level and the pipeline's latest step.
+  const [captionLevel, setCaptionLevel] = useState(0)
+  const [captionActivity, setCaptionActivity] = useState<{ kind: MeterActivity; at: number } | null>(null)
+  const [interpreterLevel, setInterpreterLevel] = useState(0)
+  const [interpreterActivity, setInterpreterActivity] = useState<{ kind: MeterActivity; at: number } | null>(null)
   const [captionDisplay, setCaptionDisplay] = useState<CaptionDisplay>(() => {
     const stored = localStorage.getItem('interact_caption_display')
     return stored === 'zh' || stored === 'en' ? stored : 'both'
@@ -144,6 +159,18 @@ export function PresenterPage() {
     setInterpreterOutputId(deviceId)
     localStorage.setItem('interact_interp_output', deviceId)
   }
+  function changeInterpreterVoice(voice: InterpreterVoice) {
+    setInterpreterVoice(voice)
+    localStorage.setItem('interact_interp_voice', voice)
+  }
+  function changeSteadyVoice(voice: string) {
+    setSteadyVoice(voice)
+    localStorage.setItem('interact_interp_steady_voice', voice)
+  }
+  function changeInterpreterTone(tone: string) {
+    setInterpreterTone(tone)
+    localStorage.setItem('interact_interp_tone', tone)
+  }
 
   useEffect(() => {
     if (!interpreterOn) return
@@ -167,8 +194,13 @@ export function PresenterPage() {
           language: interpreterLanguage,
           output: interpreterOutput,
           outputDeviceId: interpreterOutputId,
+          voice: interpreterVoice,
+          steadyVoice,
+          get tone() { return interpreterToneRef.current },
           onStatus: setInterpreterStatus,
           onText: setInterpreterText,
+          onLevel: setInterpreterLevel,
+          onActivity: (kind) => setInterpreterActivity({ kind, at: Date.now() }),
         })
         // Device labels appear once the microphone has been granted.
         refreshInterpreterOutputs()
@@ -183,9 +215,11 @@ export function PresenterPage() {
       cancelled = true
       stop?.()
       setInterpreterStatus((current) => (current.state === 'error' ? current : { state: 'off' }))
+      setInterpreterLevel(0)
+      setInterpreterActivity(null)
     }
-    // Language and device changes restart the interpreter on purpose.
-  }, [interpreterOn, interpreterLanguage, interpreterOutput, interpreterOutputId, refreshInterpreterOutputs, sessionId])
+    // Language, device and voice changes restart the interpreter on purpose; the tone does not.
+  }, [interpreterOn, interpreterLanguage, interpreterOutput, interpreterOutputId, interpreterVoice, steadyVoice, refreshInterpreterOutputs, sessionId])
 
   useEffect(() => {
     if (!captionsOn) return
@@ -209,6 +243,8 @@ export function PresenterPage() {
           vocabulary: localStorage.getItem('interact_caption_vocab') || '',
           onError: (message) => setCaptionStatus({ state: 'error', message }),
           onStatus: setCaptionStatus,
+          onLevel: setCaptionLevel,
+          onActivity: (kind) => setCaptionActivity({ kind, at: Date.now() }),
         })
         if (cancelled) stopRecorder()
       } catch (error) {
@@ -222,6 +258,8 @@ export function PresenterPage() {
       cancelled = true
       stopRecorder?.()
       setCaptionStatus((current) => (current.state === 'error' ? current : { state: 'off' }))
+      setCaptionLevel(0)
+      setCaptionActivity(null)
     }
   }, [captionsOn, sessionId])
 
@@ -1028,6 +1066,16 @@ export function PresenterPage() {
           captionStatus={captionStatus}
           interpreterEnabled={interpreterOn}
           interpreterStatus={interpreterStatus}
+          interpreterVoice={interpreterVoice}
+          onChangeInterpreterVoice={changeInterpreterVoice}
+          steadyVoice={steadyVoice}
+          onChangeSteadyVoice={changeSteadyVoice}
+          interpreterTone={interpreterTone}
+          onChangeInterpreterTone={changeInterpreterTone}
+          captionLevel={captionLevel}
+          captionActivity={captionActivity}
+          interpreterLevel={interpreterLevel}
+          interpreterActivity={interpreterActivity}
           interpreterLanguage={interpreterLanguage}
           onChangeInterpreterLanguage={changeInterpreterLanguage}
           interpreterOutput={interpreterOutput}

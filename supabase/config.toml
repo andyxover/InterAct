@@ -29,3 +29,9 @@ verify_jwt = false
 
 [functions.caption-tts]
 verify_jwt = false
+
+[functions.translate-token]
+verify_jwt = false
+
+[functions.interp-tts]
+verify_jwt = false
