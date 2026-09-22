@@ -8,11 +8,22 @@ const PARTIAL_BROADCAST_MS = 250
 const PARTIAL_TRANSLATE_MS = 800
 const PARTIAL_TRANSLATE_MIN_CHARS = 4
 const MAX_RECONNECT_ATTEMPTS = 8
-// A sentence the server has not closed by this size or age is closed from
-// here, so a lecturer who never pauses still gets captions in readable pieces
-// rather than one paragraph a minute late.
+// Segmenting is done here. gpt-live-transcribe streams words as they are
+// said and leaves it to the client to say where a turn ends; the older
+// models had the server's VAD do it. A turn ends at half a second of
+// silence after speech — a phrase boundary, which is what a caption should
+// be — or, for a lecturer who never pauses, at this many characters or
+// seconds of speech.
+const SEGMENT_SILENCE_MS = 400
+const MIN_SEGMENT_SPEECH_MS = 400
 const LONG_SEGMENT_CHARS = 120
 const LONG_SEGMENT_MS = 8000
+// When a long turn must be cut, wait this long for a brief quiet moment so
+// the cut lands between words, not inside one.
+const LONG_CUT_GRACE_MS = 2000
+// Audio captured while the socket is still connecting is kept, not dropped:
+// the teacher starts talking the moment they press the toggle.
+const PRECONNECT_BUFFER_MS = 6000
 // No audio energy for this long while live means the microphone is not
 // reaching us (muted, wrong device, tab throttled). Said, not guessed at.
 const SILENCE_WARN_MS = 12000
@@ -79,7 +90,9 @@ async function mintStreamToken(sessionId: string, presenterToken: string, vocabu
   })
   if (error) throw new Error('無法建立字幕連線，請稍後再試。')
   if (typeof data?.token !== 'string' || !data.token) throw new Error(data?.message || '無法建立字幕連線。')
-  return data.token as string
+  // clientCommits: the server has no turn detection and expects us to end
+  // each turn (gpt-live-transcribe). Otherwise the server's VAD does it.
+  return { token: data.token as string, clientCommits: data?.clientCommits === true }
 }
 
 // Streams microphone audio to OpenAI Realtime transcription with a
@@ -104,8 +117,14 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
   const broadcast = await liveChannelReady(sessionId)
 
   let lastPartialSentAt = 0
+  // The in-progress text, by item: with client-side turns a delta for the
+  // next turn can arrive before the completion of the previous one, and the
+  // two must not be glued together. What viewers see is the newest item.
+  const partialByItem = new Map<string, string>()
+  let partialItem = ''
   let partialText = ''
   let partialStartedAt = 0
+  let clientCommits = false
   // Rolling translation of the in-progress sentence so cross-language viewers
   // see the caption forming live instead of waiting for the sentence to end.
   let partialTranslation: PartialTranslation = { lang: null, zh: null, en: null }
@@ -150,6 +169,24 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
 
   let stopped = false
   let socket: WebSocket | null = null
+  const preconnect: string[] = []
+  let lastFinal: { text: string; at: number } | null = null
+  // A turn cut by us sometimes re-emits the last word of the previous turn
+  // at the start of the next ("…five sixths." / "Sixths, any questions?").
+  // Dropped only when the text starts with the exact last word of a turn
+  // that ended a moment ago; a genuine repeat that far apart is a
+  // coincidence we accept. Applied to the partial on screen and to the
+  // stored line alike, so they agree.
+  const trimOverlap = (raw: string) => {
+    if (!lastFinal || Date.now() - lastFinal.at > 4000) return raw
+    const tail = lastFinal.text.replace(/[\s.,!?。，！？；;:：]+$/u, '')
+    const lastWord = /[\u4e00-\u9fff]$/u.test(tail) ? tail.slice(-2) : (tail.split(/\s+/).pop() ?? '')
+    const head = raw.replace(/^[\s.,!?。，！？；;:：]+/u, '')
+    if (lastWord.length < 2 || !head.toLowerCase().startsWith(lastWord.toLowerCase())) return raw
+    const rest = head.slice(lastWord.length).replace(/^[\s.,!?。，！？；;:：]+/u, '')
+    return rest.length >= 2 ? rest.charAt(0).toUpperCase() + rest.slice(1) : raw
+  }
+  let preconnectMs = 0
   let reconnectAttempts = 0
   let reportedError = false
   const reportError = (message: string) => {
@@ -159,33 +196,58 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
     onError(message)
   }
 
-  // Forcing the end of a long sentence. If the server ever objects to a manual
-  // commit while its own turn detection is on, the guard switches itself off
-  // rather than bothering the teacher about it.
+  // Ending a turn. Sent when speech has paused, or when the turn has grown
+  // long. Never on an empty buffer — the server refuses that — and never
+  // twice in quick succession. If the server ever objects (an older model
+  // with its own turn detection), the guard switches itself off rather than
+  // bothering the teacher about it.
   let manualCommitAllowed = true
-  let lastManualCommitAt = 0
-  const closeLongSegment = () => {
+  let lastCommitAt = 0
+  let speechSinceCommitMs = 0
+  let audioSinceCommitMs = 0
+  let lastSpeechAt = 0
+  const commitTurn = (reason: 'silence' | 'long') => {
     if (!manualCommitAllowed || socket?.readyState !== WebSocket.OPEN) return
     const now = Date.now()
-    if (now - lastManualCommitAt < 2000) return
+    if (now - lastCommitAt < 1000) return
+    if (speechSinceCommitMs < MIN_SEGMENT_SPEECH_MS || audioSinceCommitMs < 200) return
+    lastCommitAt = now
+    speechSinceCommitMs = 0
+    audioSinceCommitMs = 0
+    longCutPendingSince = 0
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+    if (reason === 'long') partialStartedAt = now
+  }
+  // A long turn is not cut on the spot: the audio loop waits for the next
+  // quiet chunk (a breath between words) and cuts there, or after a short
+  // grace period regardless.
+  let longCutPendingSince = 0
+  const closeLongSegment = () => {
+    if (longCutPendingSince) return
+    const now = Date.now()
     const tooLong = partialText.length >= LONG_SEGMENT_CHARS
     const tooOld = partialStartedAt > 0 && now - partialStartedAt >= LONG_SEGMENT_MS && partialText.length >= PARTIAL_TRANSLATE_MIN_CHARS * 4
-    if (!tooLong && !tooOld) return
-    lastManualCommitAt = now
-    socket.send(JSON.stringify({ type: 'input_audio_buffer.commit' }))
+    if (tooLong || tooOld) longCutPendingSince = now
   }
 
-  const finalizeSentence = (transcript: string) => {
+  const finalizeSentence = (transcript: string, itemId: string) => {
     // Keep the last partial on viewers' screens while the finalized (and
     // fully translated) caption is being produced — clearing here left a
     // blank gap that read as latency. Viewers replace the partial themselves
     // when the finished caption arrives.
-    partialText = ''
-    partialStartedAt = 0
-    partialTranslation = { lang: null, zh: null, en: null }
-    lastTranslateAt = 0
-    const text = transcript.trim()
+    partialByItem.delete(itemId)
+    if (itemId === partialItem || !partialByItem.size) {
+      partialItem = ''
+      partialText = ''
+      partialStartedAt = 0
+      partialTranslation = { lang: null, zh: null, en: null }
+      lastTranslateAt = 0
+    }
+    // The live model writes Chinese in Simplified characters; the class reads
+    // Traditional. Converted here so the stored line matches the screen.
+    const text = trimOverlap(toTraditional(transcript.trim()))
     if (!text) return
+    lastFinal = { text, at: Date.now() }
     void supabase.functions
       .invoke('live-caption', { body: { sessionId, presenterToken, transcript: text } })
       .then(({ data, error }) => {
@@ -204,8 +266,10 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
 
   const connect = async () => {
     if (stopped) return
-    const token = await mintStreamToken(sessionId, presenterToken, vocabulary)
+    const minted = await mintStreamToken(sessionId, presenterToken, vocabulary)
     if (stopped) return
+    const token = minted.token
+    clientCommits = minted.clientCommits
 
     const nextSocket = new WebSocket('wss://api.openai.com/v1/realtime', [
       'realtime',
@@ -218,24 +282,37 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
       reportedError = false
       live = true
       setStatus({ state: 'live' })
+      // What was said while we were connecting.
+      for (const chunk of preconnect) nextSocket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: chunk }))
+      preconnect.length = 0
+      preconnectMs = 0
     }
     nextSocket.onmessage = (event) => {
       try {
         const data = JSON.parse(String(event.data))
         if (data.type === 'conversation.item.input_audio_transcription.delta' && typeof data.delta === 'string') {
-          if (!partialText) partialStartedAt = Date.now()
+          const itemId = typeof data.item_id === 'string' ? data.item_id : 'current'
+          if (itemId !== partialItem) {
+            // A new turn has started streaming. Show it from here on.
+            partialItem = itemId
+            partialText = partialByItem.get(itemId) ?? ''
+            partialTranslation = { lang: null, zh: null, en: null }
+            lastTranslateAt = 0
+            if (!partialText) partialStartedAt = Date.now()
+          }
           partialText += data.delta
-          sendPartial(toTraditional(partialText))
+          partialByItem.set(itemId, partialText)
+          sendPartial(trimOverlap(toTraditional(partialText)))
           translatePartial()
           closeLongSegment()
         } else if (data.type === 'conversation.item.input_audio_transcription.completed' && typeof data.transcript === 'string') {
-          finalizeSentence(data.transcript)
+          finalizeSentence(data.transcript, typeof data.item_id === 'string' ? data.item_id : 'current')
         } else if (data.type === 'error') {
           const message = String(data.error?.message || '')
-          if (/commit/i.test(message) && /buffer|empty|vad|turn/i.test(message)) {
-            // Our long-segment commit, refused. Stop sending them; the
-            // server's own segmentation carries on.
-            manualCommitAllowed = false
+          if (/commit/i.test(message) && /buffer|empty|vad|turn|small/i.test(message)) {
+            // A commit the server did not want (empty buffer, or a model with
+            // its own turn detection). Not the teacher's problem.
+            if (!clientCommits) manualCommitAllowed = false
             return
           }
           reportError(message || '字幕串流發生錯誤。')
@@ -282,9 +359,30 @@ export async function startCaptionRecorder({ sessionId, presenterToken, vocabula
       silentWarned = true
       setStatus({ state: 'silent' })
     }
-    if (socket?.readyState !== WebSocket.OPEN) return
     const samples = downsampleTo24k(input, audioContext.sampleRate)
-    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: floatToPcm16Base64(samples) }))
+    const encoded = floatToPcm16Base64(samples)
+    const durationMs = (input.length / audioContext.sampleRate) * 1000
+    if (socket?.readyState !== WebSocket.OPEN) {
+      // Keep the last few seconds for the socket to catch up on.
+      preconnect.push(encoded)
+      preconnectMs += durationMs
+      while (preconnectMs > PRECONNECT_BUFFER_MS && preconnect.length) { preconnect.shift(); preconnectMs -= durationMs }
+      return
+    }
+    socket.send(JSON.stringify({ type: 'input_audio_buffer.append', audio: encoded }))
+    // Our own turn-taking: this buffer is ~85 ms of audio.
+    audioSinceCommitMs += durationMs
+    const loud = rms(input) > SILENCE_RMS
+    if (loud) {
+      speechSinceCommitMs += durationMs
+      lastSpeechAt = now
+    }
+    if (!clientCommits) return
+    if (!loud && speechSinceCommitMs >= MIN_SEGMENT_SPEECH_MS && now - lastSpeechAt >= SEGMENT_SILENCE_MS) {
+      commitTurn('silence')
+    } else if (longCutPendingSince && (!loud || now - longCutPendingSince >= LONG_CUT_GRACE_MS)) {
+      commitTurn('long')
+    }
   }
   source.connect(processor)
   processor.connect(audioContext.destination)
