@@ -3867,3 +3867,31 @@ h2 {
 @media (prefers-reduced-motion: reduce) {
   .caption-status-dot, .interpretation-toggle.is-blocked, .interpretation-toggle.is-speaking svg { animation: none; }
 }
+
+/* Live interpreter controls beside the caption ones. */
+.caption-hint {
+  margin: 6px 0 0;
+  font-size: 12px;
+  line-height: 1.5;
+  color: var(--muted, #6b7280);
+}
+.caption-refresh {
+  flex: none;
+  padding: 4px 6px;
+  min-width: 0;
+}
+.interp-text {
+  margin: 8px 0 0;
+  padding: 8px 10px;
+  border-radius: 10px;
+  background: var(--surface, #f6f7fb);
+  border: 1px solid var(--border, #e5e7eb);
+  font-size: 13px;
+  line-height: 1.5;
+  color: var(--text, #1f2937);
+  max-height: 4.6em;
+  overflow: hidden;
+  display: -webkit-box;
+  -webkit-line-clamp: 3;
+  -webkit-box-orient: vertical;
+}

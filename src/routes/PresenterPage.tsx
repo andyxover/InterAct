@@ -17,6 +17,8 @@ import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
 import { startCaptionRecorder } from '../lib/liveCaptions'
 import type { CaptionStatus } from '../lib/liveCaptions'
+import { listOutputDevices, startInterpreter } from '../lib/liveInterpreter'
+import type { InterpreterLanguage, InterpreterStatus, OutputDevice } from '../lib/liveInterpreter'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -76,6 +78,15 @@ export function PresenterPage() {
   // What the caption pipeline is doing right now, shown beside the toggle so
   // a teacher can tell "connecting" from "broken" from "your mic is muted".
   const [captionStatus, setCaptionStatus] = useState<CaptionStatus>({ state: 'off' })
+  // The live interpreter: speech-to-speech translation played out of a chosen
+  // output device on this machine (a SKAA transmitter feeding students'
+  // headphones). Language and device are remembered between classes.
+  const [interpreterOn, setInterpreterOn] = useState(false)
+  const [interpreterStatus, setInterpreterStatus] = useState<InterpreterStatus>({ state: 'off' })
+  const [interpreterLanguage, setInterpreterLanguage] = useState<InterpreterLanguage>(() => (localStorage.getItem('interact_interp_lang') === 'zh' ? 'zh' : 'en'))
+  const [interpreterOutputId, setInterpreterOutputId] = useState(() => localStorage.getItem('interact_interp_output') || '')
+  const [interpreterOutputs, setInterpreterOutputs] = useState<OutputDevice[]>([])
+  const [interpreterText, setInterpreterText] = useState('')
   const [captionDisplay, setCaptionDisplay] = useState<CaptionDisplay>(() => {
     const stored = localStorage.getItem('interact_caption_display')
     return stored === 'zh' || stored === 'en' ? stored : 'both'
@@ -111,6 +122,64 @@ export function PresenterPage() {
     setCaptionVocabulary(vocabulary)
     localStorage.setItem('interact_caption_vocab', vocabulary)
   }
+
+  const refreshInterpreterOutputs = useCallback(() => {
+    void listOutputDevices().then(setInterpreterOutputs).catch(() => setInterpreterOutputs([]))
+  }, [])
+  useEffect(() => {
+    refreshInterpreterOutputs()
+    navigator.mediaDevices?.addEventListener?.('devicechange', refreshInterpreterOutputs)
+    return () => navigator.mediaDevices?.removeEventListener?.('devicechange', refreshInterpreterOutputs)
+  }, [refreshInterpreterOutputs])
+  function changeInterpreterLanguage(language: InterpreterLanguage) {
+    setInterpreterLanguage(language)
+    localStorage.setItem('interact_interp_lang', language)
+  }
+  function changeInterpreterOutput(deviceId: string) {
+    setInterpreterOutputId(deviceId)
+    localStorage.setItem('interact_interp_output', deviceId)
+  }
+
+  useEffect(() => {
+    if (!interpreterOn) return
+    const presenterToken = getPresenterToken(sessionId)
+    if (!presenterToken) {
+      setInterpreterStatus({ state: 'error', message: '這個舊場次沒有講者權限，無法開啟口譯。' })
+      setInterpreterOn(false)
+      return
+    }
+    let cancelled = false
+    let stop: (() => void) | null = null
+    setInterpreterText('')
+    const begin = async () => {
+      try {
+        const granted = await window.interactDesktop?.requestMicrophoneAccess?.() ?? true
+        if (!granted) throw new Error('請在系統設定允許 InterAct 使用麥克風後再開啟口譯。')
+        if (cancelled) return
+        stop = await startInterpreter({
+          sessionId,
+          presenterToken,
+          language: interpreterLanguage,
+          outputDeviceId: interpreterOutputId,
+          onStatus: setInterpreterStatus,
+          onText: setInterpreterText,
+        })
+        // Device labels appear once the microphone has been granted.
+        refreshInterpreterOutputs()
+        if (cancelled) stop()
+      } catch (error) {
+        setInterpreterStatus({ state: 'error', message: error instanceof Error ? error.message : '無法開啟口譯。' })
+        setInterpreterOn(false)
+      }
+    }
+    void begin()
+    return () => {
+      cancelled = true
+      stop?.()
+      setInterpreterStatus((current) => (current.state === 'error' ? current : { state: 'off' }))
+    }
+    // Language and device changes restart the interpreter on purpose.
+  }, [interpreterOn, interpreterLanguage, interpreterOutputId, refreshInterpreterOutputs, sessionId])
 
   useEffect(() => {
     if (!captionsOn) return
@@ -951,6 +1020,16 @@ export function PresenterPage() {
           onStopQuestion={stopQuestion}
           captionsEnabled={captionsOn}
           captionStatus={captionStatus}
+          interpreterEnabled={interpreterOn}
+          interpreterStatus={interpreterStatus}
+          interpreterLanguage={interpreterLanguage}
+          onChangeInterpreterLanguage={changeInterpreterLanguage}
+          interpreterOutputId={interpreterOutputId}
+          interpreterOutputs={interpreterOutputs}
+          onChangeInterpreterOutput={changeInterpreterOutput}
+          onRefreshInterpreterOutputs={refreshInterpreterOutputs}
+          interpreterText={interpreterText}
+          onToggleInterpreter={() => setInterpreterOn((current) => !current)}
           captionDisplay={captionDisplay}
           onChangeCaptionDisplay={changeCaptionDisplay}
           captionSize={captionSize}
