@@ -1,7 +1,7 @@
 {
   "name": "interact",
   "private": true,
-  "version": "1.0.8",
+  "version": "1.0.9",
   "description": "InterAct real-time classroom interaction system",
   "author": "Yujen Lien",
   "type": "module",
