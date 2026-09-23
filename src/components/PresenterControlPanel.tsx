@@ -1,6 +1,6 @@
 import type { CaptionStatus } from '../lib/liveCaptions'
-import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, Headphones, MessageSquare, MonitorUp, RefreshCw, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
-import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
+import { BellRing, Captions, CaptionsOff, Cloud, Dice5, DoorOpen, Eye, EyeOff, Headphones, MessageSquare, Mic, MonitorUp, RefreshCw, Send, Shapes, Sparkles, Square, Users } from 'lucide-react'
+import type { InputDevice, InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
 import type { Session } from '../types'
 import { MicMeter } from './MicMeter'
 import type { MeterActivity } from './MicMeter'
@@ -67,6 +67,11 @@ type Props = {
   onRefreshInterpreterOutputs: () => void
   interpreterText: string
   onToggleInterpreter: () => void
+  /** The microphone both captions and the interpreter listen to. */
+  inputDeviceId: string
+  inputDevices: InputDevice[]
+  onChangeInputDevice: (deviceId: string) => void
+  onRefreshInputDevices: () => void
   interpreterVoice: InterpreterVoice
   onChangeInterpreterVoice: (voice: InterpreterVoice) => void
   steadyVoice: string
@@ -118,6 +123,10 @@ export function PresenterControlPanel({
   onRefreshInterpreterOutputs,
   interpreterText,
   onToggleInterpreter,
+  inputDeviceId,
+  inputDevices,
+  onChangeInputDevice,
+  onRefreshInputDevices,
   interpreterVoice,
   onChangeInterpreterVoice,
   steadyVoice,
@@ -229,6 +238,23 @@ export function PresenterControlPanel({
             <b>{interpreterEnabled ? '開啟' : '關閉'}</b>
           </button>
         </div>
+        {/* Always on show, so the microphone can be chosen before anything is switched on. */}
+        <label className="caption-vocab-row">
+            <span className="caption-display-label"><Mic size={14} /> 麥克風</span>
+            <select
+              className="caption-vocab-input"
+              value={inputDeviceId}
+              onChange={(event) => onChangeInputDevice(event.target.value)}
+            >
+              <option value="">系統預設麥克風</option>
+              {inputDevices.filter((d) => d.deviceId && d.deviceId !== 'default').map((device) => (
+                <option key={device.deviceId} value={device.deviceId}>{device.label}</option>
+              ))}
+            </select>
+            <button aria-label="重新整理麥克風清單" className="ghost-button caption-refresh" title="重新整理麥克風清單" type="button" onClick={onRefreshInputDevices}>
+              <RefreshCw size={14} />
+            </button>
+          </label>
         {(interpreterEnabled || interpreterStatus.state === 'error') && (
           <p className={`caption-status caption-status-${interpreterStatus.state}`} role="status">
             <span className="caption-status-dot" aria-hidden="true" />

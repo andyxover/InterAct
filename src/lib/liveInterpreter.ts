@@ -46,6 +46,27 @@ export type InterpreterStatus =
   | { state: 'error'; message: string }
 
 export type OutputDevice = { deviceId: string; label: string }
+export type InputDevice = { deviceId: string; label: string }
+
+/** The microphone constraints for a chosen device; empty means the system default. */
+export function microphoneConstraints(inputDeviceId = ''): MediaStreamConstraints {
+  const audio: MediaTrackConstraints = { echoCancellation: true, noiseSuppression: true }
+  if (inputDeviceId && inputDeviceId !== 'default') audio.deviceId = { exact: inputDeviceId }
+  return { audio }
+}
+
+/**
+ * Every microphone this machine has. Labels only appear once the microphone
+ * has been granted, so the list fills in after captions or the interpreter
+ * have run once.
+ */
+export async function listInputDevices(): Promise<InputDevice[]> {
+  if (!navigator.mediaDevices?.enumerateDevices) return []
+  const devices = await navigator.mediaDevices.enumerateDevices()
+  return devices
+    .filter((device) => device.kind === 'audioinput')
+    .map((device, index) => ({ deviceId: device.deviceId, label: device.label || `麥克風 ${index + 1}` }))
+}
 
 type Options = {
   sessionId: string
@@ -54,6 +75,8 @@ type Options = {
   output: InterpreterOutput
   /** Output device id from listOutputDevices(); empty for the system default. */
   outputDeviceId?: string
+  /** Microphone id from listInputDevices(); empty for the system default. */
+  inputDeviceId?: string
   voice?: InterpreterVoice
   /** 'steady' only: the text-to-speech voice, and the manner it should read in. */
   steadyVoice?: string
@@ -213,7 +236,7 @@ export async function listOutputDevices(): Promise<OutputDevice[]> {
 
 type SinkAudioContext = AudioContext & { setSinkId?: (sinkId: string) => Promise<void> }
 
-export async function startInterpreter({ sessionId, presenterToken, language, output, outputDeviceId = '', voice = 'adaptive', steadyVoice = 'marin', steadyModel = 'expressive', tone = '', onStatus, onText, onLevel, onActivity }: Options) {
+export async function startInterpreter({ sessionId, presenterToken, language, output, outputDeviceId = '', inputDeviceId = '', voice = 'adaptive', steadyVoice = 'marin', steadyModel = 'expressive', tone = '', onStatus, onText, onLevel, onActivity }: Options) {
   const setStatus = (status: InterpreterStatus) => onStatus?.(status)
   setStatus({ state: 'connecting' })
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟口譯。')
@@ -240,9 +263,13 @@ export async function startInterpreter({ sessionId, presenterToken, language, ou
 
   // Input: the microphone, as 24 kHz PCM16. Echo cancellation stays on so
   // whatever leaks from an output into the room is not fed back.
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true },
-  }).catch(() => { void outCtx.close(); throw new Error('無法使用麥克風，請確認已允許 InterAct 錄音。') })
+  const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(inputDeviceId)).catch((caught: unknown) => {
+    void outCtx.close()
+    const name = caught instanceof Error ? caught.name : ''
+    throw new Error(name === 'OverconstrainedError' || name === 'NotFoundError'
+      ? '找不到選擇的麥克風，請重新整理裝置清單後再選一次。'
+      : '無法使用麥克風，請確認已允許 InterAct 錄音。')
+  })
   const inCtx = new AudioContext()
   const source = inCtx.createMediaStreamSource(stream)
   // ScriptProcessorNode is deprecated but works everywhere without a worker,

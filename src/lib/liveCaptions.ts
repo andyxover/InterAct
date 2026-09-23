@@ -1,5 +1,6 @@
 import * as OpenCC from 'opencc-js'
 import { liveChannelReady } from './liveChannel'
+import { microphoneConstraints } from './liveInterpreter'
 import { requireSupabase } from './supabase'
 import type { Caption } from '../types'
 
@@ -43,6 +44,8 @@ type CaptionRecorderOptions = {
   sessionId: string
   presenterToken: string
   vocabulary?: string
+  /** Microphone id from listInputDevices(); empty for the system default. */
+  inputDeviceId?: string
   onError: (message: string) => void
   onStatus?: (status: CaptionStatus) => void
   /** Microphone level, 0–1, a few times a second. */
@@ -108,15 +111,18 @@ async function mintStreamToken(sessionId: string, presenterToken: string, vocabu
 // session's shared broadcast channel; each finished sentence is stored and
 // translated through the live-caption edge function, and the stored row is
 // broadcast to viewers straight away.
-export async function startCaptionRecorder({ sessionId, presenterToken, vocabulary = '', onError, onStatus, onLevel, onActivity }: CaptionRecorderOptions) {
+export async function startCaptionRecorder({ sessionId, presenterToken, vocabulary = '', inputDeviceId = '', onError, onStatus, onLevel, onActivity }: CaptionRecorderOptions) {
   if (!navigator.mediaDevices?.getUserMedia) throw new Error('此環境不支援錄音，無法開啟即時字幕。')
 
   const supabase = requireSupabase()
   const setStatus = (status: CaptionStatus) => onStatus?.(status)
   setStatus({ state: 'connecting' })
 
-  const stream = await navigator.mediaDevices.getUserMedia({
-    audio: { echoCancellation: true, noiseSuppression: true },
+  const stream = await navigator.mediaDevices.getUserMedia(microphoneConstraints(inputDeviceId)).catch((caught: unknown) => {
+    const name = caught instanceof Error ? caught.name : ''
+    throw new Error(name === 'OverconstrainedError' || name === 'NotFoundError'
+      ? '找不到選擇的麥克風，請重新整理裝置清單後再選一次。'
+      : '無法使用麥克風，請確認已允許 InterAct 錄音。')
   })
 
   // Joined before anything is sent: a broadcast on a channel that has not

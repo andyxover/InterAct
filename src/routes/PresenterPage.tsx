@@ -19,8 +19,8 @@ import { TextDispatchModal } from '../components/TextDispatchModal'
 import { finalizeLottery } from '../lib/lottery'
 import { startCaptionRecorder } from '../lib/liveCaptions'
 import type { CaptionStatus } from '../lib/liveCaptions'
-import { listOutputDevices, startInterpreter } from '../lib/liveInterpreter'
-import type { InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
+import { listInputDevices, listOutputDevices, startInterpreter } from '../lib/liveInterpreter'
+import type { InputDevice, InterpreterLanguage, InterpreterOutput, InterpreterStatus, InterpreterVoice, OutputDevice } from '../lib/liveInterpreter'
 import { getPresenterToken } from '../lib/presenterAuth'
 import { endManagedSession } from '../lib/presenterSessions'
 import { isBuzzerPending } from '../lib/buzzer'
@@ -89,6 +89,10 @@ export function PresenterPage() {
   const [interpreterOutput, setInterpreterOutput] = useState<InterpreterOutput>(() => { const v = localStorage.getItem('interact_interp_mode'); return v === 'phones' || v === 'both' ? v : 'device' })
   const [interpreterOutputId, setInterpreterOutputId] = useState(() => localStorage.getItem('interact_interp_output') || '')
   const [interpreterOutputs, setInterpreterOutputs] = useState<OutputDevice[]>([])
+  // The microphone both pipelines listen to. Remembered on this machine; a
+  // change restarts whichever of captions and the interpreter is running.
+  const [inputDeviceId, setInputDeviceId] = useState(() => localStorage.getItem('interact_mic_input') || '')
+  const [inputDevices, setInputDevices] = useState<InputDevice[]>([])
   const [interpreterText, setInterpreterText] = useState('')
   // Whose voice the class hears, and in what manner. Remembered on this machine.
   const [interpreterVoice, setInterpreterVoice] = useState<InterpreterVoice>(() => (localStorage.getItem('interact_interp_voice') === 'steady' ? 'steady' : 'adaptive'))
@@ -141,7 +145,12 @@ export function PresenterPage() {
 
   const refreshInterpreterOutputs = useCallback(() => {
     void listOutputDevices().then(setInterpreterOutputs).catch(() => setInterpreterOutputs([]))
+    void listInputDevices().then(setInputDevices).catch(() => setInputDevices([]))
   }, [])
+  function changeInputDevice(deviceId: string) {
+    setInputDeviceId(deviceId)
+    localStorage.setItem('interact_mic_input', deviceId)
+  }
   useEffect(() => {
     refreshInterpreterOutputs()
     navigator.mediaDevices?.addEventListener?.('devicechange', refreshInterpreterOutputs)
@@ -194,6 +203,7 @@ export function PresenterPage() {
           language: interpreterLanguage,
           output: interpreterOutput,
           outputDeviceId: interpreterOutputId,
+          inputDeviceId,
           voice: interpreterVoice,
           steadyVoice,
           get tone() { return interpreterToneRef.current },
@@ -219,7 +229,7 @@ export function PresenterPage() {
       setInterpreterActivity(null)
     }
     // Language, device and voice changes restart the interpreter on purpose; the tone does not.
-  }, [interpreterOn, interpreterLanguage, interpreterOutput, interpreterOutputId, interpreterVoice, steadyVoice, refreshInterpreterOutputs, sessionId])
+  }, [interpreterOn, interpreterLanguage, interpreterOutput, interpreterOutputId, inputDeviceId, interpreterVoice, steadyVoice, refreshInterpreterOutputs, sessionId])
 
   useEffect(() => {
     if (!captionsOn) return
@@ -241,11 +251,14 @@ export function PresenterPage() {
           sessionId,
           presenterToken,
           vocabulary: localStorage.getItem('interact_caption_vocab') || '',
+          inputDeviceId,
           onError: (message) => setCaptionStatus({ state: 'error', message }),
           onStatus: setCaptionStatus,
           onLevel: setCaptionLevel,
           onActivity: (kind) => setCaptionActivity({ kind, at: Date.now() }),
         })
+        // Microphone labels appear once the microphone has been granted.
+        refreshInterpreterOutputs()
         if (cancelled) stopRecorder()
       } catch (error) {
         setCaptionStatus({ state: 'error', message: error instanceof Error ? error.message : '無法開啟即時字幕。' })
@@ -261,7 +274,8 @@ export function PresenterPage() {
       setCaptionLevel(0)
       setCaptionActivity(null)
     }
-  }, [captionsOn, sessionId])
+    // A microphone change restarts captions on purpose.
+  }, [captionsOn, inputDeviceId, refreshInterpreterOutputs, sessionId])
 
   const fallbackJoinUrl = useMemo(
     () => buildJoinUrl(session?.code || sessionId),
@@ -1066,6 +1080,10 @@ export function PresenterPage() {
           captionStatus={captionStatus}
           interpreterEnabled={interpreterOn}
           interpreterStatus={interpreterStatus}
+          inputDeviceId={inputDeviceId}
+          inputDevices={inputDevices}
+          onChangeInputDevice={changeInputDevice}
+          onRefreshInputDevices={refreshInterpreterOutputs}
           interpreterVoice={interpreterVoice}
           onChangeInterpreterVoice={changeInterpreterVoice}
           steadyVoice={steadyVoice}
